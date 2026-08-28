@@ -1,0 +1,7 @@
+.pio/
+refs/M5PaperColor-UserDemo/
+preview.png
+src/config.h
+
+monitor.log
+*.zip
