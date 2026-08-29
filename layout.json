@@ -1,0 +1,75 @@
+{
+  "_comment": "Single source of truth for pixel geometry shared by tools/preview.py and src/main.cpp. preview.py reads this file at runtime. tools/gen_layout_header.py turns it into src/layout.h (auto-run by `pio run`, see platformio.ini extra_scripts). Edit this file, not the generated header. Colors, fonts, and text content are not layout and stay hardcoded in each file.",
+
+  "screen": { "w": 400, "h": 600 },
+
+  "header": {
+    "height": 56,
+    "station_x": 12, "station_y": 8,
+    "datetime_x": 13, "datetime_y": 38
+  },
+
+  "_comment_now_strip": "Positions reused as-is for src/main.cpp: F_HUGE/F_MED/F_SMALL/F_BIG map to fonts within a few px of these PIL sizes (see the mapping comment above drawHeader() in main.cpp), unlike the wind reading which needed its own firmware_only offsets. Still a first pass -- check on-device.",
+  "now_strip": {
+    "y0_offset": 56,
+    "label_x": 12, "label_y": 10,
+    "value_x": 12, "value_y": 34,
+    "unit_gap_x": 6, "unit_y": 58,
+    "trend_arrow_x": 150, "trend_arrow_y": 40,
+    "trend_word_x": 180, "trend_word_y": 48,
+    "next_right_margin": 12,
+    "next_label_dy": 30, "next_time_dy": 46, "next_value_dy": 80
+  },
+
+  "tide_box": {
+    "x0": 12, "y0": 172, "right_margin": 12, "y1": 336,
+    "event_marker_radius": 3,
+    "now_line_width": 2
+  },
+
+  "wind": {
+    "y": 352,
+    "label_x": 12,
+    "compass_cx": 78, "compass_dy": 74, "compass_r": 46,
+    "arrow_tip_inset": 8, "arrow_tail_inset": 18,
+    "arrow_underlay_width": 9, "arrow_color_width": 5,
+    "gust_x": 152, "gust_dy": 80,
+    "from_x": 152, "from_dy": 106,
+    "chip_right_offset": 26, "chip_dy": 26, "chip_w": 12, "chip_h": 48
+  },
+
+  "forecast": {
+    "x0": 12, "right_margin": 12, "top": 502, "bottom": 572,
+    "bar_inset": 1, "bar_min_height": 1, "bar_height_margin": 12,
+    "label_dy_above_top": 18,
+    "hour_label_dy": 9
+  },
+
+  "footer": { "y": 583, "left_x": 12, "right_margin": 12 },
+
+  "_comment_firmware_only": "Elements only src/main.cpp draws. Not consumed by preview.py.",
+  "firmware_only": {
+    "header": { "readout_right_offset": 150, "readout_y": 20 },
+    "_comment_wind": "reading_dy/kt_dy are a first-pass estimate for FreeSansBold18pt7b (42px line height) + FreeSansBold9pt7b (22px), bottom-aligned by line-height difference (42-22=20). Not verified on hardware -- check on-device and adjust.",
+    "wind": { "reading_x": 152, "reading_dy": 20, "kt_gap": 8, "kt_dy": 40 }
+  },
+
+  "_comment_preview_only": "Elements only tools/preview.py draws (compass labels, arrow barbs) that src/main.cpp has not implemented yet. Skipped by tools/gen_layout_header.py.",
+  "preview_only": {
+    "header": {
+      "indoor_margin": 12, "indoor_y": 10,
+      "battery_margin": 12, "battery_y": 30
+    },
+    "tide_box": {
+      "label_high_dy": -18, "label_low_dy": 10,
+      "label_clamp_y_margin": 8, "label_clamp_x_margin": 20,
+      "now_marker_half_width": 5, "now_marker_height": 7
+    },
+    "wind": {
+      "compass_label_radius_offset": 11,
+      "arrow_barb_angle_deg": 140, "arrow_barb_length": 16,
+      "reading_x": 152, "reading_dy": 26,
+      "kt_label_gap": 8, "kt_label_dy": 52
+    }
+  }
+}

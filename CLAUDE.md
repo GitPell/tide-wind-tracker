@@ -5,6 +5,56 @@ coastal location. Wakes on a timer, fetches data over Wi-Fi, redraws, sleeps.
 
 ---
 
+## Current state (as of 2026-08-28)
+
+**Works, confirmed on real hardware:**
+- Build pipeline: `pio run` regenerates `src/layout.h` from `layout.json` and
+  compiles clean.
+- Full cycle: Wi-Fi connect -> NTP -> NOAA tide fetch -> Open-Meteo wind fetch
+  all succeeding (`tides=1 wind=1` in `monitor.log`).
+- Panel power-up (PM1 GPIO0 `EPD_EN`) and the full draw: header, "now strip"
+  (current tide value, trend arrow, next high/low), tide curve, wind section,
+  wind forecast bars all render correctly and are legible on the panel.
+- Real fonts throughout, replacing the tiny default `Font0` bitmap font
+  everything started out using (see Verified corrections below).
+- SHT40 indoor temp/humidity read.
+
+**Implemented but not yet confirmed on hardware:** the forecast section label
+("WIND, NEXT 24H (kt)"), hour-of-day ticks, footer, and the hand-drawn degree
+ring next to the wind direction were just added -- built clean, not yet seen
+on the actual panel. Get a fresh device photo before trusting the spacing,
+the same way the GUST/FROM line spacing needed one correction after the
+first look.
+
+**Known gaps vs. the `tools/preview.py` design** (tracked in `layout.json`'s
+`preview_only` section): compass N/E/S/W labels around the wind circle, and
+the barbed wind arrowhead (`main.cpp` draws a plain thick line instead) --
+both cosmetic, not bugs.
+
+**Not yet exercised at all:**
+- The real low-power sleep path. `setup()` currently ends with
+  `delay(60000); ESP.restart();` (look for the `// TODO: restore before
+  battery testing` comment) instead of calling `sleepUntilNext()`. Every test
+  cycle so far has been a software restart, not a real PM1 shutdown + RX8130
+  wake -- the actual cold-boot-every-cycle path, and the PM1-RTC-RAM-backed
+  full-refresh counter that depends on it, has never run on this hardware.
+- Battery life / current draw. The 92.53uA standby figure is a datasheet
+  target derived from reading the reference firmware, not a measurement on
+  this board.
+
+**Next steps, roughly in order:**
+1. Flash and photograph the latest changes (forecast label/ticks, footer,
+   degree ring); fix any spacing issues the same way the GUST/FROM cramping
+   was fixed.
+2. Decide whether the compass labels and arrow barbs are worth adding, or
+   leave the device's simplified rendering as final.
+3. Swap `delay(60000); ESP.restart();` back for `sleepUntilNext()` and
+   confirm on real hardware that the board actually wakes on schedule via
+   the RX8130 alarm.
+4. Measure real standby/active current and run a multi-day battery soak test.
+
+---
+
 ## READ THIS FIRST (instructions for Claude)
 
 Your training data is unreliable for this board. It is **not** the older
@@ -76,8 +126,41 @@ Grove PORT.A (HY2.0-4P): `G4`, `G5`, power direction via PM1 `BOOST5V_EN_PP`.
 ### Verified corrections (do not re-litigate)
 
 - `M5Unified` has **no** `Sht4x` member on this board. The SHT40 at I2C 0x44
-  must be read directly over Wire (SDA G3, SCL G2). Confirmed by compile error,
-  2026-08-28.
+  must be read with raw I2C transactions over the shared system bus --
+  `M5.In_I2C.start()/write()/read()/stop()` -- not the standalone Arduino
+  `Wire` object. Command 0xFD (high-precision measure), ~10ms delay, read 6
+  bytes, decode with the Sensirion SHT4x linear formula. Matches
+  `refs/M5PaperColor-UserDemo/main/hal/hal.cpp Hal::sht40Read()`. Confirmed by
+  compile error + reading source, 2026-08-28.
+
+- `Serial` is native USB CDC on this board (`ARDUINO_USB_CDC_ON_BOOT=1` in
+  `platformio.ini`), not a UART-to-USB bridge chip. There's no hardware
+  buffering the port while the host OS enumerates it, so anything printed to
+  `Serial` right after `Serial.begin()` is lost if a terminal attaches after
+  boot rather than before. Wait on `while (!Serial && millis() - start <
+  TIMEOUT) delay(10);` with a timeout -- the board must still boot fine with
+  nothing attached (e.g. running on battery in the field), so don't wait
+  forever. Confirmed 2026-08-28.
+
+- M5GFX ships **no bold DejaVu** -- only regular-weight `DejaVu9/12/18/24/40
+  /56/72` (GFXfont, converted straight from `DejaVuSans.ttf`, named by pixel
+  line-height, in `.pio/libdeps/m5stack-papercolor/M5GFX/src/lgfx/Fonts/
+  Custom/`). For bold, the closest bundled family is Adafruit's "Free Fonts"
+  `FreeSansBold9/12/18/24pt7b` (nominal point size, not pixel height, and a
+  different type family -- visually close, not identical). Mapping settled
+  on for this project (see the comment above `drawHeader()` in
+  `src/main.cpp`): F_HUGE->`FreeSansBold18pt7b`(42px), F_BIG->
+  `FreeSansBold12pt7b`(29px), F_MED->`FreeSansBold9pt7b`(22px), F_REG->
+  `DejaVu18`(18px), F_SMALL->`DejaVu12`(13px), F_TINY->`DejaVu9`(10px).
+  Every bundled GFXfont's charset is **ASCII-only (0x20-0x7E)** -- no
+  ▲/▼/°/· glyphs, unlike `tools/preview.py`'s PIL-rendered TTF. Hand-draw
+  those instead (`fillTriangle`, `drawCircle`) rather than printing the
+  Unicode character -- see the trend triangle in `drawNowStrip()` and the
+  degree ring in `drawWind()`. Also: the font before any `setFont()` call is
+  `Font0`, a 6x8 GLCD bitmap font -- `setTextSize()` alone changes scale, not
+  font family, and does not get you a bigger typeface. Confirmed by reading
+  `.pio/libdeps/m5stack-papercolor/M5GFX/src/lgfx/Fonts/` and testing
+  on-device, 2026-08-28.
 
 - `M5.begin()` does **not** power the e-paper rail on this board. M5Unified's
   own board-init switch for `board_M5PaperColor`
@@ -209,8 +292,21 @@ the serial log yourself rather than asking the user to paste them.
 ## Repo layout
 
 ```
-src/config.h      Wi-Fi creds, station IDs, coordinates, cadence
-src/main.cpp      wake -> connect -> fetch -> draw -> sleep
-tools/preview.py  host-side layout renderer, palette-accurate
-refs/             vendored upstream sources, read-only reference
+src/config.h              Wi-Fi creds, station IDs, coordinates, cadence
+src/main.cpp              wake -> connect -> fetch -> draw -> sleep
+src/layout.h              GENERATED from layout.json -- do not edit by hand
+tools/preview.py          host-side layout renderer, palette-accurate
+tools/gen_layout_header.py  layout.json -> src/layout.h, run automatically by `pio run`
+layout.json               shared pixel-geometry source of truth for both of the above
+refs/                     vendored upstream sources, read-only reference
 ```
+
+Pixel coordinates (box positions, radii, offsets -- not colors, fonts, or text)
+live in `layout.json`, not in `tools/preview.py` or `src/main.cpp` directly.
+Change layout there; `pio run` regenerates `src/layout.h` automatically via
+the `extra_scripts` hook in `platformio.ini`, and `preview.py` reads
+`layout.json` itself at runtime. `layout.json` still documents (in its
+`preview_only` section) two elements `preview.py` renders that `main.cpp`
+does not implement -- compass cardinal labels and the barbed wind
+arrowhead. See "Current state" at the top of this file for what's confirmed
+working on real hardware versus just built.

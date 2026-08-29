@@ -5,7 +5,9 @@ Host-side layout preview for the PaperColor tide & wind tracker.
 Renders the exact 400x600 dashboard using only the six Spectra 6 colors, so you
 can iterate on layout in milliseconds instead of waiting 15-30s per panel
 refresh. The drawing code here is the specification the C++ in src/main.cpp
-should mirror -- same coordinates, same palette, same rounding.
+should mirror -- same coordinates, same palette, same rounding. Pixel
+coordinates themselves live in ../layout.json (read at runtime, below); edit
+that file to move things, not the literals that used to be inline here.
 
     python tools/preview.py              # synthetic data, no network
     python tools/preview.py --live       # fetch real NOAA + Open-Meteo data
@@ -20,6 +22,7 @@ import json
 import math
 import os
 import sys
+from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -30,7 +33,14 @@ STATION_ID = "9414290"
 STATION_NAME = "GOLDEN GATE"
 LAT, LON = 37.8063, -122.4659
 
-W, H = 400, 600
+# --- Layout --------------------------------------------------------------
+# layout.json is the single source of truth for pixel geometry, shared with
+# src/main.cpp (via the generated src/layout.h -- see
+# tools/gen_layout_header.py). Edit layout.json, not the literals below.
+
+LAYOUT = json.loads((Path(__file__).resolve().parent.parent / "layout.json").read_text())
+
+W, H = LAYOUT["screen"]["w"], LAYOUT["screen"]["h"]
 
 # --- Spectra 6 palette -------------------------------------------------------
 # Approximate sRGB values for the six achievable colors. Tune these against a
@@ -49,6 +59,7 @@ PALETTE = [BLACK, WHITE, RED, YELLOW, BLUE, GREEN]
 # --- Fonts -------------------------------------------------------------------
 
 FONT_DIRS = [
+    os.path.join(os.path.dirname(__file__), "fonts"),
     "/usr/share/fonts/truetype/dejavu",
     "/System/Library/Fonts/Supplemental",
     "C:/Windows/Fonts",
@@ -211,14 +222,22 @@ def render(s):
     img = Image.new("RGB", (W, H), WHITE)
     d = ImageDraw.Draw(img)
 
+    hdr, po_hdr = LAYOUT["header"], LAYOUT["preview_only"]["header"]
+    tide_box, po_tide = LAYOUT["tide_box"], LAYOUT["preview_only"]["tide_box"]
+    wind, po_wind = LAYOUT["wind"], LAYOUT["preview_only"]["wind"]
+    fc = LAYOUT["forecast"]
+    now_strip = LAYOUT["now_strip"]
+    footer = LAYOUT["footer"]
+
     # ---- Header -------------------------------------------------------------
-    d.rectangle([0, 0, W, 56], fill=BLUE)
-    d.text((12, 8), s.station, font=F_BIG, fill=WHITE)
-    d.text((13, 38), s.updated.strftime("%a %d %b  %H:%M").upper(),
-           font=F_SMALL, fill=WHITE)
-    right(d, (W - 12, 10), f"{s.indoor_c:.0f}\u00b0C  {s.indoor_rh:.0f}%",
-          F_SMALL, WHITE)
-    right(d, (W - 12, 30), f"BATT {s.battery_pct}%", F_SMALL, WHITE)
+    d.rectangle([0, 0, W, hdr["height"]], fill=BLUE)
+    d.text((hdr["station_x"], hdr["station_y"]), s.station, font=F_BIG, fill=WHITE)
+    d.text((hdr["datetime_x"], hdr["datetime_y"]),
+           s.updated.strftime("%a %d %b  %H:%M").upper(), font=F_SMALL, fill=WHITE)
+    right(d, (W - po_hdr["indoor_margin"], po_hdr["indoor_y"]),
+          f"{s.indoor_c:.0f}\u00b0C  {s.indoor_rh:.0f}%", F_SMALL, WHITE)
+    right(d, (W - po_hdr["battery_margin"], po_hdr["battery_y"]),
+          f"BATT {s.battery_pct}%", F_SMALL, WHITE)
 
     # ---- Now strip ----------------------------------------------------------
     rising = None
@@ -230,26 +249,30 @@ def render(s):
     else:
         nxt = None
 
-    y0 = 56
-    d.text((12, y0 + 10), "TIDE", font=F_MED, fill=BLACK)
-    d.text((12, y0 + 34), f"{s.tide_now:.1f}", font=F_HUGE, fill=BLACK)
+    y0 = now_strip["y0_offset"]
+    d.text((now_strip["label_x"], y0 + now_strip["label_y"]), "TIDE", font=F_MED, fill=BLACK)
+    d.text((now_strip["value_x"], y0 + now_strip["value_y"]),
+           f"{s.tide_now:.1f}", font=F_HUGE, fill=BLACK)
     l, t_, r, b = d.textbbox((0, 0), f"{s.tide_now:.1f}", font=F_HUGE)
-    d.text((12 + (r - l) + 6, y0 + 58), "ft", font=F_MED, fill=BLACK)
+    d.text((now_strip["value_x"] + (r - l) + now_strip["unit_gap_x"], y0 + now_strip["unit_y"]),
+           "ft", font=F_MED, fill=BLACK)
 
     if rising is not None:
         arrow, word = ("\u25b2", "RISING") if rising else ("\u25bc", "FALLING")
         col = GREEN if rising else RED
-        d.text((150, y0 + 40), arrow, font=F_BIG, fill=col)
-        d.text((180, y0 + 48), word, font=F_MED, fill=col)
+        d.text((now_strip["trend_arrow_x"], y0 + now_strip["trend_arrow_y"]), arrow, font=F_BIG, fill=col)
+        d.text((now_strip["trend_word_x"], y0 + now_strip["trend_word_y"]), word, font=F_MED, fill=col)
 
     if nxt:
         label = "NEXT HIGH" if nxt[2] == "H" else "NEXT LOW"
-        right(d, (W - 12, y0 + 30), label, F_SMALL, BLACK)
-        right(d, (W - 12, y0 + 46), nxt[0].strftime("%H:%M"), F_BIG, BLACK)
-        right(d, (W - 12, y0 + 80), f"{nxt[1]:.1f} ft", F_SMALL, BLACK)
+        nrm = now_strip["next_right_margin"]
+        right(d, (W - nrm, y0 + now_strip["next_label_dy"]), label, F_SMALL, BLACK)
+        right(d, (W - nrm, y0 + now_strip["next_time_dy"]), nxt[0].strftime("%H:%M"), F_BIG, BLACK)
+        right(d, (W - nrm, y0 + now_strip["next_value_dy"]), f"{nxt[1]:.1f} ft", F_SMALL, BLACK)
 
     # ---- Tide curve ---------------------------------------------------------
-    cx0, cy0, cx1, cy1 = 12, 172, W - 12, 336
+    cx0, cy0 = tide_box["x0"], tide_box["y0"]
+    cx1, cy1 = W - tide_box["right_margin"], tide_box["y1"]
     d.rectangle([cx0, cy0, cx1, cy1], outline=BLACK, width=1)
 
     if s.tide_curve:
@@ -280,78 +303,91 @@ def render(s):
             cur += dt.timedelta(hours=6)
 
         # High / low markers
+        mr = tide_box["event_marker_radius"]
         for t, v, kind in s.tide_events:
             if not (tmin <= t <= tmax):
                 continue
             x, y = px(t), py(v)
             col = YELLOW if kind == "H" else WHITE
-            d.ellipse([x - 3, y - 3, x + 3, y + 3], fill=col, outline=BLACK)
-            ty = y - 18 if kind == "H" else y + 10
-            ty = min(max(ty, cy0 + 8), cy1 - 8)
-            tx = min(max(x, cx0 + 20), cx1 - 20)
+            d.ellipse([x - mr, y - mr, x + mr, y + mr], fill=col, outline=BLACK)
+            ty = y + (po_tide["label_high_dy"] if kind == "H" else po_tide["label_low_dy"])
+            ty = min(max(ty, cy0 + po_tide["label_clamp_y_margin"]), cy1 - po_tide["label_clamp_y_margin"])
+            tx = min(max(x, cx0 + po_tide["label_clamp_x_margin"]), cx1 - po_tide["label_clamp_x_margin"])
             centered(d, (tx, ty), t.strftime("%H:%M"), F_TINY,
                      BLACK if kind == "H" else WHITE)
 
         # Now marker, drawn last so it sits on top
         now_x = px(min(max(s.updated, tmin), tmax))
-        d.line([(now_x, cy0), (now_x, cy1)], fill=RED, width=2)
-        d.polygon([(now_x - 5, cy0), (now_x + 5, cy0), (now_x, cy0 + 7)], fill=RED)
+        d.line([(now_x, cy0), (now_x, cy1)], fill=RED, width=tide_box["now_line_width"])
+        hw, th = po_tide["now_marker_half_width"], po_tide["now_marker_height"]
+        d.polygon([(now_x - hw, cy0), (now_x + hw, cy0), (now_x, cy0 + th)], fill=RED)
 
     # ---- Wind ---------------------------------------------------------------
-    wy = 352
-    d.text((12, wy), "WIND", font=F_MED, fill=BLACK)
+    wy = wind["y"]
+    d.text((wind["label_x"], wy), "WIND", font=F_MED, fill=BLACK)
 
     # Compass rose
-    ccx, ccy, cr = 78, wy + 74, 46
+    ccx, ccy, cr = wind["compass_cx"], wy + wind["compass_dy"], wind["compass_r"]
     d.ellipse([ccx - cr, ccy - cr, ccx + cr, ccy + cr], outline=BLACK, width=2)
+    lr = cr + po_wind["compass_label_radius_offset"]
     for lbl, ang in (("N", 0), ("E", 90), ("S", 180), ("W", 270)):
         a = math.radians(ang - 90)
-        centered(d, (ccx + math.cos(a) * (cr + 11), ccy + math.sin(a) * (cr + 11)),
+        centered(d, (ccx + math.cos(a) * lr, ccy + math.sin(a) * lr),
                  lbl, F_TINY, BLACK)
 
     # Arrow points the way the wind is GOING (dir is where it comes FROM).
     a = math.radians(s.wind_dir + 180 - 90)
-    tipx, tipy = ccx + math.cos(a) * (cr - 8), ccy + math.sin(a) * (cr - 8)
-    tailx, taily = ccx - math.cos(a) * (cr - 18), ccy - math.sin(a) * (cr - 18)
+    tip_in, tail_in = wind["arrow_tip_inset"], wind["arrow_tail_inset"]
+    tipx, tipy = ccx + math.cos(a) * (cr - tip_in), ccy + math.sin(a) * (cr - tip_in)
+    tailx, taily = ccx - math.cos(a) * (cr - tail_in), ccy - math.sin(a) * (cr - tail_in)
     ac = wind_color(s.wind_now)
+    barb_ang, barb_len = po_wind["arrow_barb_angle_deg"], po_wind["arrow_barb_length"]
     # Draw a black underlay one step wider so yellow arrows stay visible.
-    for col, wdt in ((BLACK, 9), (ac, 5)):
+    for col, wdt in ((BLACK, wind["arrow_underlay_width"]), (ac, wind["arrow_color_width"])):
         d.line([(tailx, taily), (tipx, tipy)], fill=col, width=wdt)
-        for side in (140, -140):
+        for side in (barb_ang, -barb_ang):
             b = a + math.radians(side)
             d.line([(tipx, tipy),
-                    (tipx + math.cos(b) * 16, tipy + math.sin(b) * 16)],
+                    (tipx + math.cos(b) * barb_len, tipy + math.sin(b) * barb_len)],
                    fill=col, width=wdt)
 
     # Numbers stay black. Yellow and green text on white is illegible on this
     # panel, so the speed band is carried by a solid chip instead of by ink color.
-    d.text((152, wy + 26), f"{s.wind_now:.0f}", font=F_HUGE, fill=BLACK)
+    rx, ry = po_wind["reading_x"], wy + po_wind["reading_dy"]
+    d.text((rx, ry), f"{s.wind_now:.0f}", font=F_HUGE, fill=BLACK)
     l, t_, r, b = d.textbbox((0, 0), f"{s.wind_now:.0f}", font=F_HUGE)
-    d.text((152 + (r - l) + 8, wy + 52), "kt", font=F_MED, fill=BLACK)
-    d.rectangle([W - 26, wy + 26, W - 14, wy + 74], fill=ac, outline=BLACK)
-    d.text((152, wy + 80), f"GUST {s.gust_now:.0f} kt", font=F_REG, fill=BLACK)
-    d.text((152, wy + 100), f"FROM {compass(s.wind_dir)}  {s.wind_dir}\u00b0",
-           font=F_REG, fill=BLACK)
+    d.text((rx + (r - l) + po_wind["kt_label_gap"], wy + po_wind["kt_label_dy"]),
+           "kt", font=F_MED, fill=BLACK)
+    chip_x0, chip_y0 = W - wind["chip_right_offset"], wy + wind["chip_dy"]
+    d.rectangle([chip_x0, chip_y0, chip_x0 + wind["chip_w"], chip_y0 + wind["chip_h"]],
+                fill=ac, outline=BLACK)
+    d.text((wind["gust_x"], wy + wind["gust_dy"]), f"GUST {s.gust_now:.0f} kt", font=F_REG, fill=BLACK)
+    d.text((wind["from_x"], wy + wind["from_dy"]),
+           f"FROM {compass(s.wind_dir)}  {s.wind_dir}\u00b0", font=F_REG, fill=BLACK)
 
     # ---- 24h wind forecast strip -------------------------------------------
-    sx0, sy0, sx1, sy1 = 12, 502, W - 12, 572
-    right(d, (W - 12, sy0 - 18), "WIND, NEXT 24H (kt)", F_SMALL, BLACK)
+    sx0, sy0 = fc["x0"], fc["top"]
+    sx1, sy1 = W - fc["right_margin"], fc["bottom"]
+    right(d, (W - fc["right_margin"], sy0 - fc["label_dy_above_top"]),
+          "WIND, NEXT 24H (kt)", F_SMALL, BLACK)
     if s.wind_forecast:
         n = len(s.wind_forecast)
         bw = (sx1 - sx0) / n
         peak = max(max(v for _, v in s.wind_forecast), 20.0)
+        bi = fc["bar_inset"]
         for i, (t, v) in enumerate(s.wind_forecast):
             x = sx0 + i * bw
-            bh = max(1.0, (max(v, 0.0) / peak) * (sy1 - sy0 - 12))
-            d.rectangle([x + 1, sy1 - bh, x + bw - 1, sy1],
+            bh = max(float(fc["bar_min_height"]),
+                     (max(v, 0.0) / peak) * (sy1 - sy0 - fc["bar_height_margin"]))
+            d.rectangle([x + bi, sy1 - bh, x + bw - bi, sy1],
                         fill=wind_color(v), outline=BLACK)
             if t.hour % 6 == 0:
-                centered(d, (x + bw / 2, sy1 + 9), t.strftime("%H"), F_TINY, BLACK)
+                centered(d, (x + bw / 2, sy1 + fc["hour_label_dy"]), t.strftime("%H"), F_TINY, BLACK)
     d.line([(sx0, sy1), (sx1, sy1)], fill=BLACK, width=1)
 
     # ---- Footer -------------------------------------------------------------
-    d.text((12, 583), "NOAA CO-OPS \u00b7 Open-Meteo", font=F_TINY, fill=BLACK)
-    right(d, (W - 12, 583), f"UPD {s.updated.strftime('%H:%M')}", F_TINY, BLACK)
+    d.text((footer["left_x"], footer["y"]), "NOAA CO-OPS \u00b7 Open-Meteo", font=F_TINY, fill=BLACK)
+    right(d, (W - footer["right_margin"], footer["y"]), f"UPD {s.updated.strftime('%H:%M')}", F_TINY, BLACK)
 
     return img
 

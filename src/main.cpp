@@ -17,6 +17,7 @@
 #include <time.h>
 
 #include "config.h"
+#include "layout.h"  // GENERATED from layout.json -- see tools/gen_layout_header.py
 
 // ---------------------------------------------------------------- palette ---
 // M5GFX takes RGB888; the panel driver maps to the nearest of six colors.
@@ -28,8 +29,8 @@ static constexpr uint32_t C_YELLOW = 0xFFF338;
 static constexpr uint32_t C_BLUE   = 0x0000BF;
 static constexpr uint32_t C_GREEN  = 0x007C00;
 
-static constexpr int SCREEN_W = 400;
-static constexpr int SCREEN_H = 600;
+static constexpr int SCREEN_W = layout::screen::W;
+static constexpr int SCREEN_H = layout::screen::H;
 
 // ------------------------------------------------------------------- data ---
 struct TidePoint { time_t t; float ft; };
@@ -225,30 +226,112 @@ static bool fetchWind(Snapshot& s) {
 }
 
 // ------------------------------------------------------------------- draw ---
-// Coordinates here mirror tools/preview.py. Change them there first.
+// Pixel coordinates come from layout::* (generated from ../layout.json --
+// see tools/gen_layout_header.py). Iterate on layout with tools/preview.py
+// first, then edit layout.json; both consumers pick it up from there.
+
+// Font mapping from tools/preview.py's PIL fonts to bundled M5GFX fonts (see
+// .pio/libdeps/m5stack-papercolor/M5GFX/src/lgfx/Fonts). M5GFX ships no bold
+// DejaVu, so the bold sizes (F_HUGE/F_BIG/F_MED) use FreeSansBold instead;
+// the regular sizes (F_REG/F_SMALL/F_TINY) use the bundled DejaVu, converted
+// from the same DejaVuSans.ttf preview.py uses. Picked one size down from a
+// naive line-height match so on-device text doesn't dwarf preview.py's.
+//   F_HUGE (Bold 46) -> FreeSansBold18pt7b (42px)
+//   F_BIG  (Bold 30) -> FreeSansBold12pt7b (29px)
+//   F_MED  (Bold 18) -> FreeSansBold9pt7b  (22px)
+//   F_REG  (Reg  15) -> DejaVu18           (18px)
+//   F_SMALL(Reg  12) -> DejaVu12           (13px)
+//   F_TINY (Reg  10) -> DejaVu9            (10px)
 
 static void drawHeader(const Snapshot& s) {
-  M5.Display.fillRect(0, 0, SCREEN_W, 56, C_BLUE);
+  using namespace layout::header;
+  M5.Display.fillRect(0, 0, SCREEN_W, HEIGHT, C_BLUE);
   M5.Display.setTextColor(C_WHITE, C_BLUE);
   M5.Display.setTextSize(1);
-  M5.Display.setCursor(12, 8);
+
+  M5.Display.setFont(&fonts::FreeSansBold12pt7b);  // F_BIG equivalent
+  M5.Display.setCursor(STATION_X, STATION_Y);
   M5.Display.print(STATION_LABEL);
 
   char buf[40];
   time_t now = time(nullptr);
   struct tm lt; localtime_r(&now, &lt);
   strftime(buf, sizeof buf, "%a %d %b  %H:%M", &lt);
-  M5.Display.setCursor(13, 38);
+  M5.Display.setFont(&fonts::DejaVu12);  // F_SMALL equivalent
+  M5.Display.setCursor(DATETIME_X, DATETIME_Y);
   M5.Display.print(buf);
 
   snprintf(buf, sizeof buf, "%.0fC %.0f%%  BATT %d%%",
            s.indoorC, s.indoorRh, s.battery);
-  M5.Display.setCursor(SCREEN_W - 150, 20);
+  using namespace layout::firmware_only::header;
+  M5.Display.setCursor(SCREEN_W - READOUT_RIGHT_OFFSET, READOUT_Y);
   M5.Display.print(buf);
 }
 
+// Side of the trend triangle in drawNowStrip(). Hand-drawn rather than a text
+// glyph because the bundled GFXfont charsets are ASCII-only (0x20-0x7E) --
+// no unicode triangle characters, unlike preview.py's PIL-rendered TTF.
+static constexpr int TREND_ARROW_SIZE = 20;
+
+static void drawNowStrip(const Snapshot& s) {
+  using namespace layout::now_strip;
+  const int y0 = Y0_OFFSET;
+  M5.Display.setTextColor(C_BLACK, C_WHITE);
+
+  M5.Display.setFont(&fonts::FreeSansBold9pt7b);  // F_MED equivalent
+  M5.Display.setCursor(LABEL_X, y0 + LABEL_Y);
+  M5.Display.print("TIDE");
+
+  char buf[16];
+  snprintf(buf, sizeof buf, "%.1f", s.tideNow);
+  M5.Display.setFont(&fonts::FreeSansBold18pt7b);  // F_HUGE equivalent
+  M5.Display.setCursor(VALUE_X, y0 + VALUE_Y);
+  M5.Display.print(buf);
+  int valW = M5.Display.textWidth(buf);
+  M5.Display.setFont(&fonts::FreeSansBold9pt7b);  // F_MED equivalent
+  M5.Display.setCursor(VALUE_X + valW + UNIT_GAP_X, y0 + UNIT_Y);
+  M5.Display.print("ft");
+
+  // Next tide event strictly after now, mirroring preview.py's "rising"/"nxt"
+  // scan over the hilo events.
+  time_t now = time(nullptr);
+  const TideEvent* nxt = nullptr;
+  for (int i = 0; i < s.nEvents; i++) {
+    if (s.events[i].t > now) { nxt = &s.events[i]; break; }
+  }
+  if (!nxt) return;
+
+  bool rising = nxt->kind == 'H';
+  uint32_t col = rising ? C_GREEN : C_RED;
+  int tx = TREND_ARROW_X, ty = y0 + TREND_ARROW_Y, tw = TREND_ARROW_SIZE;
+  if (rising) {
+    M5.Display.fillTriangle(tx, ty + tw, tx + tw, ty + tw, tx + tw / 2, ty, col);
+  } else {
+    M5.Display.fillTriangle(tx, ty, tx + tw, ty, tx + tw / 2, ty + tw, col);
+  }
+  M5.Display.setTextColor(col, C_WHITE);
+  M5.Display.setFont(&fonts::FreeSansBold9pt7b);  // F_MED equivalent
+  M5.Display.setCursor(TREND_WORD_X, y0 + TREND_WORD_Y);
+  M5.Display.print(rising ? "RISING" : "FALLING");
+  M5.Display.setTextColor(C_BLACK, C_WHITE);
+
+  M5.Display.setFont(&fonts::DejaVu12);  // F_SMALL equivalent
+  M5.Display.drawRightString(nxt->kind == 'H' ? "NEXT HIGH" : "NEXT LOW",
+                             SCREEN_W - NEXT_RIGHT_MARGIN, y0 + NEXT_LABEL_DY);
+
+  struct tm nt; localtime_r(&nxt->t, &nt);
+  strftime(buf, sizeof buf, "%H:%M", &nt);
+  M5.Display.setFont(&fonts::FreeSansBold12pt7b);  // F_BIG equivalent
+  M5.Display.drawRightString(buf, SCREEN_W - NEXT_RIGHT_MARGIN, y0 + NEXT_TIME_DY);
+
+  snprintf(buf, sizeof buf, "%.1f ft", nxt->ft);
+  M5.Display.setFont(&fonts::DejaVu12);  // F_SMALL equivalent
+  M5.Display.drawRightString(buf, SCREEN_W - NEXT_RIGHT_MARGIN, y0 + NEXT_VALUE_DY);
+}
+
 static void drawTide(const Snapshot& s) {
-  const int x0 = 12, y0 = 172, x1 = SCREEN_W - 12, y1 = 336;
+  using namespace layout::tide_box;
+  const int x0 = X0, y0 = Y0, x1 = SCREEN_W - RIGHT_MARGIN, y1 = Y1;
   M5.Display.setTextColor(C_BLACK, C_WHITE);
   M5.Display.drawRect(x0, y0, x1 - x0, y1 - y0, C_BLACK);
   if (s.nTide < 2) return;
@@ -284,32 +367,35 @@ static void drawTide(const Snapshot& s) {
     if (s.events[i].t < t0 || s.events[i].t > t1) continue;
     int x = px(s.events[i].t), y = py(s.events[i].ft);
     bool high = s.events[i].kind == 'H';
-    M5.Display.fillCircle(x, y, 3, high ? C_YELLOW : C_WHITE);
-    M5.Display.drawCircle(x, y, 3, C_BLACK);
+    M5.Display.fillCircle(x, y, EVENT_MARKER_RADIUS, high ? C_YELLOW : C_WHITE);
+    M5.Display.drawCircle(x, y, EVENT_MARKER_RADIUS, C_BLACK);
   }
 
   int nx = px(constrain(time(nullptr), t0, t1));
-  M5.Display.drawFastVLine(nx, y0, y1 - y0, C_RED);
-  M5.Display.drawFastVLine(nx + 1, y0, y1 - y0, C_RED);
+  for (int i = 0; i < NOW_LINE_WIDTH; i++) {
+    M5.Display.drawFastVLine(nx + i, y0, y1 - y0, C_RED);
+  }
 }
 
 static void drawWind(const Snapshot& s) {
-  const int wy = 352;
+  using namespace layout::wind;
+  const int wy = Y;
   M5.Display.setTextColor(C_BLACK, C_WHITE);
-  M5.Display.setCursor(12, wy);
+  M5.Display.setFont(&fonts::FreeSansBold9pt7b);  // F_MED equivalent
+  M5.Display.setCursor(LABEL_X, wy);
   M5.Display.print("WIND");
 
-  const int cx = 78, cy = wy + 74, r = 46;
+  const int cx = COMPASS_CX, cy = wy + COMPASS_DY, r = COMPASS_R;
   M5.Display.drawCircle(cx, cy, r, C_BLACK);
 
   float a = radians(s.windDir + 180 - 90);
-  int tipx = cx + cosf(a) * (r - 8), tipy = cy + sinf(a) * (r - 8);
-  int tlx  = cx - cosf(a) * (r - 18), tly = cy - sinf(a) * (r - 18);
+  int tipx = cx + cosf(a) * (r - ARROW_TIP_INSET), tipy = cy + sinf(a) * (r - ARROW_TIP_INSET);
+  int tlx  = cx - cosf(a) * (r - ARROW_TAIL_INSET), tly = cy - sinf(a) * (r - ARROW_TAIL_INSET);
   uint32_t ac = windColor(s.windNow);
   // Black underlay first, so a yellow arrow still reads against white.
   for (int pass = 0; pass < 2; pass++) {
     uint32_t col = pass ? ac : C_BLACK;
-    int w = pass ? 5 : 9;
+    int w = pass ? ARROW_COLOR_WIDTH : ARROW_UNDERLAY_WIDTH;
     for (int o = -w / 2; o <= w / 2; o++) {
       M5.Display.drawLine(tlx + o, tly, tipx + o, tipy, col);
       M5.Display.drawLine(tlx, tly + o, tipx, tipy + o, col);
@@ -317,43 +403,91 @@ static void drawWind(const Snapshot& s) {
   }
 
   char buf[48];
-  snprintf(buf, sizeof buf, "%.0f kt", s.windNow);
-  M5.Display.setCursor(152, wy + 30); M5.Display.print(buf);
+  using namespace layout::firmware_only::wind;
+  snprintf(buf, sizeof buf, "%.0f", s.windNow);
+  M5.Display.setFont(&fonts::FreeSansBold18pt7b);  // F_HUGE equivalent
+  M5.Display.setCursor(READING_X, wy + READING_DY);
+  M5.Display.print(buf);
+  int numW = M5.Display.textWidth(buf);
+  M5.Display.setFont(&fonts::FreeSansBold9pt7b);  // F_MED equivalent
+  M5.Display.setCursor(READING_X + numW + KT_GAP, wy + KT_DY);
+  M5.Display.print("kt");
+
+  M5.Display.setFont(&fonts::DejaVu18);  // F_REG equivalent
   snprintf(buf, sizeof buf, "GUST %.0f kt", s.gustNow);
-  M5.Display.setCursor(152, wy + 80); M5.Display.print(buf);
+  M5.Display.setCursor(GUST_X, wy + GUST_DY); M5.Display.print(buf);
   snprintf(buf, sizeof buf, "FROM %s %d", compass(s.windDir), s.windDir);
-  M5.Display.setCursor(152, wy + 100); M5.Display.print(buf);
+  M5.Display.setCursor(FROM_X, wy + FROM_DY); M5.Display.print(buf);
+  // DejaVu18's charset is ASCII-only (0x20-0x7E), no degree sign -- draw a
+  // small ring instead, matching preview.py's trailing "°".
+  int fromW = M5.Display.textWidth(buf);
+  static constexpr int DEG_RADIUS = 2, DEG_GAP = 2, DEG_Y_OFFSET = 3;
+  M5.Display.drawCircle(FROM_X + fromW + DEG_GAP + DEG_RADIUS,
+                        wy + FROM_DY + DEG_Y_OFFSET + DEG_RADIUS, DEG_RADIUS, C_BLACK);
 
   // Speed band as a solid chip -- coloured text is unreadable on this panel.
-  M5.Display.fillRect(SCREEN_W - 26, wy + 26, 12, 48, ac);
-  M5.Display.drawRect(SCREEN_W - 26, wy + 26, 12, 48, C_BLACK);
+  M5.Display.fillRect(SCREEN_W - CHIP_RIGHT_OFFSET, wy + CHIP_DY, CHIP_W, CHIP_H, ac);
+  M5.Display.drawRect(SCREEN_W - CHIP_RIGHT_OFFSET, wy + CHIP_DY, CHIP_W, CHIP_H, C_BLACK);
 }
 
 static void drawForecast(const Snapshot& s) {
-  const int x0 = 12, y1 = 572, x1 = SCREEN_W - 12, y0 = 502;
+  using namespace layout::forecast;
+  const int x0 = X0, y1 = BOTTOM, x1 = SCREEN_W - RIGHT_MARGIN, y0 = TOP;
   M5.Display.drawFastHLine(x0, y1, x1 - x0, C_BLACK);
+
+  M5.Display.setTextColor(C_BLACK, C_WHITE);
+  M5.Display.setFont(&fonts::DejaVu12);  // F_SMALL equivalent
+  M5.Display.drawRightString("WIND, NEXT 24H (kt)", SCREEN_W - RIGHT_MARGIN, y0 - LABEL_DY_ABOVE_TOP);
+
   if (!s.nForecast) return;
 
   float peak = 20.0f;
   for (int i = 0; i < s.nForecast; i++) peak = max(peak, s.forecast[i].kt);
 
   int bw = (x1 - x0) / s.nForecast;
+  M5.Display.setFont(&fonts::DejaVu9);  // F_TINY equivalent
   for (int i = 0; i < s.nForecast; i++) {
     float v = max(0.0f, s.forecast[i].kt);
-    int h = max(1, int(v / peak * (y1 - y0 - 12)));
+    int h = max(BAR_MIN_HEIGHT, int(v / peak * (y1 - y0 - BAR_HEIGHT_MARGIN)));
     int x = x0 + i * bw;
-    M5.Display.fillRect(x + 1, y1 - h, bw - 2, h, windColor(v));
-    M5.Display.drawRect(x + 1, y1 - h, bw - 2, h, C_BLACK);
+    M5.Display.fillRect(x + BAR_INSET, y1 - h, bw - 2 * BAR_INSET, h, windColor(v));
+    M5.Display.drawRect(x + BAR_INSET, y1 - h, bw - 2 * BAR_INSET, h, C_BLACK);
+
+    struct tm ft; localtime_r(&s.forecast[i].t, &ft);
+    if (ft.tm_hour % 6 == 0) {
+      char hbuf[4];
+      snprintf(hbuf, sizeof hbuf, "%02d", ft.tm_hour);
+      M5.Display.drawCenterString(hbuf, x + bw / 2, y1 + HOUR_LABEL_DY);
+    }
   }
+}
+
+static void drawFooter(const Snapshot& s) {
+  (void)s;
+  using namespace layout::footer;
+  M5.Display.setTextColor(C_BLACK, C_WHITE);
+  M5.Display.setFont(&fonts::DejaVu9);  // F_TINY equivalent
+  M5.Display.setCursor(LEFT_X, Y);
+  // DejaVu9's charset is ASCII-only (0x20-0x7E), no middle dot -- use a
+  // hyphen in place of preview.py's "·".
+  M5.Display.print("NOAA CO-OPS - Open-Meteo");
+
+  time_t now = time(nullptr);
+  struct tm lt; localtime_r(&now, &lt);
+  char buf[16];
+  strftime(buf, sizeof buf, "UPD %H:%M", &lt);
+  M5.Display.drawRightString(buf, SCREEN_W - RIGHT_MARGIN, Y);
 }
 
 static void drawAll(const Snapshot& s) {
   M5.Display.startWrite();
   M5.Display.fillScreen(C_WHITE);
   drawHeader(s);
+  drawNowStrip(s);
   drawTide(s);
   drawWind(s);
   drawForecast(s);
+  drawFooter(s);
   M5.Display.endWrite();
   // Confirmed against M5GFX's Panel_ED2208::display(): it calls
   // _turn_on_display() -> _wait_busy(), so this blocks for the full
