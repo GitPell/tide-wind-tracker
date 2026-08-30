@@ -47,10 +47,13 @@ namespace layout {
     constexpr int COMPASS_CX = 78;
     constexpr int COMPASS_DY = 74;
     constexpr int COMPASS_R = 46;
+    constexpr int COMPASS_LABEL_RADIUS_OFFSET = 11;
     constexpr int ARROW_TIP_INSET = 8;
     constexpr int ARROW_TAIL_INSET = 18;
     constexpr int ARROW_UNDERLAY_WIDTH = 9;
     constexpr int ARROW_COLOR_WIDTH = 5;
+    constexpr int ARROW_BARB_ANGLE_DEG = 140;
+    constexpr int ARROW_BARB_LENGTH = 16;
     constexpr int GUST_X = 152;
     constexpr int GUST_DY = 80;
     constexpr int FROM_X = 152;
@@ -64,15 +67,15 @@ namespace layout {
     constexpr int X0 = 12;
     constexpr int RIGHT_MARGIN = 12;
     constexpr int TOP = 502;
-    constexpr int BOTTOM = 572;
+    constexpr int BOTTOM = 566;
     constexpr int BAR_INSET = 1;
     constexpr int BAR_MIN_HEIGHT = 1;
     constexpr int BAR_HEIGHT_MARGIN = 12;
     constexpr int LABEL_DY_ABOVE_TOP = 18;
-    constexpr int HOUR_LABEL_DY = 9;
+    constexpr int HOUR_LABEL_DY = 8;
   }
   namespace footer {
-    constexpr int Y = 583;
+    constexpr int Y = 587;
     constexpr int LEFT_X = 12;
     constexpr int RIGHT_MARGIN = 12;
   }

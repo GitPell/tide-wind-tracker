@@ -31,21 +31,23 @@
     "y": 352,
     "label_x": 12,
     "compass_cx": 78, "compass_dy": 74, "compass_r": 46,
+    "compass_label_radius_offset": 11,
     "arrow_tip_inset": 8, "arrow_tail_inset": 18,
     "arrow_underlay_width": 9, "arrow_color_width": 5,
+    "arrow_barb_angle_deg": 140, "arrow_barb_length": 16,
     "gust_x": 152, "gust_dy": 80,
     "from_x": 152, "from_dy": 106,
     "chip_right_offset": 26, "chip_dy": 26, "chip_w": 12, "chip_h": 48
   },
 
   "forecast": {
-    "x0": 12, "right_margin": 12, "top": 502, "bottom": 572,
+    "x0": 12, "right_margin": 12, "top": 502, "bottom": 566,
     "bar_inset": 1, "bar_min_height": 1, "bar_height_margin": 12,
     "label_dy_above_top": 18,
-    "hour_label_dy": 9
+    "hour_label_dy": 8
   },
 
-  "footer": { "y": 583, "left_x": 12, "right_margin": 12 },
+  "footer": { "y": 587, "left_x": 12, "right_margin": 12 },
 
   "_comment_firmware_only": "Elements only src/main.cpp draws. Not consumed by preview.py.",
   "firmware_only": {
@@ -54,7 +56,7 @@
     "wind": { "reading_x": 152, "reading_dy": 20, "kt_gap": 8, "kt_dy": 40 }
   },
 
-  "_comment_preview_only": "Elements only tools/preview.py draws (compass labels, arrow barbs) that src/main.cpp has not implemented yet. Skipped by tools/gen_layout_header.py.",
+  "_comment_preview_only": "Elements only tools/preview.py draws (its own PIL font-metric offsets, which differ from the GFXfont ones in firmware_only). Skipped by tools/gen_layout_header.py.",
   "preview_only": {
     "header": {
       "indoor_margin": 12, "indoor_y": 10,
@@ -66,8 +68,6 @@
       "now_marker_half_width": 5, "now_marker_height": 7
     },
     "wind": {
-      "compass_label_radius_offset": 11,
-      "arrow_barb_angle_deg": 140, "arrow_barb_length": 16,
       "reading_x": 152, "reading_dy": 26,
       "kt_label_gap": 8, "kt_label_dy": 52
     }

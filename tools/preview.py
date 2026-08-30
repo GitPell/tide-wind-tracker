@@ -153,7 +153,14 @@ def live():
     s.tide_curve = [(dt.datetime.strptime(p["t"], "%Y-%m-%d %H:%M"), float(p["v"]))
                     for p in r.get("predictions", [])]
 
-    r = requests.get(coops, params={**common, "date": "today",
+    # hilo needs to look past midnight: "date=today" stops returning events
+    # once today's last high/low has passed, which starves the "next event"
+    # scan below late in the day (see src/main.cpp's coopsRangeUrl() comment
+    # for the on-device version of this same fix). begin_date only accepts an
+    # actual yyyyMMdd date, not the "today" keyword that date= supports --
+    # NOAA returns a "Wrong Date" error otherwise.
+    today_str = dt.date.today().strftime("%Y%m%d")
+    r = requests.get(coops, params={**common, "begin_date": today_str, "range": 48,
                                     "product": "predictions", "interval": "hilo"},
                      timeout=20).json()
     s.tide_events = [(dt.datetime.strptime(p["t"], "%Y-%m-%d %H:%M"),
@@ -329,7 +336,7 @@ def render(s):
     # Compass rose
     ccx, ccy, cr = wind["compass_cx"], wy + wind["compass_dy"], wind["compass_r"]
     d.ellipse([ccx - cr, ccy - cr, ccx + cr, ccy + cr], outline=BLACK, width=2)
-    lr = cr + po_wind["compass_label_radius_offset"]
+    lr = cr + wind["compass_label_radius_offset"]
     for lbl, ang in (("N", 0), ("E", 90), ("S", 180), ("W", 270)):
         a = math.radians(ang - 90)
         centered(d, (ccx + math.cos(a) * lr, ccy + math.sin(a) * lr),
@@ -341,7 +348,7 @@ def render(s):
     tipx, tipy = ccx + math.cos(a) * (cr - tip_in), ccy + math.sin(a) * (cr - tip_in)
     tailx, taily = ccx - math.cos(a) * (cr - tail_in), ccy - math.sin(a) * (cr - tail_in)
     ac = wind_color(s.wind_now)
-    barb_ang, barb_len = po_wind["arrow_barb_angle_deg"], po_wind["arrow_barb_length"]
+    barb_ang, barb_len = wind["arrow_barb_angle_deg"], wind["arrow_barb_length"]
     # Draw a black underlay one step wider so yellow arrows stay visible.
     for col, wdt in ((BLACK, wind["arrow_underlay_width"]), (ac, wind["arrow_color_width"])):
         d.line([(tailx, taily), (tipx, tipy)], fill=col, width=wdt)

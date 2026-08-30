@@ -39,7 +39,7 @@ struct WindPoint { time_t t; float kt; };
 
 struct Snapshot {
   TidePoint tide[26];      int nTide = 0;
-  TideEvent events[8];     int nEvents = 0;
+  TideEvent events[10];    int nEvents = 0;
   WindPoint forecast[24];  int nForecast = 0;
   float tideNow = 0, windNow = 0, gustNow = 0;
   int   windDir = 0;
@@ -161,9 +161,34 @@ static String coopsUrl(const char* product, const char* interval,
   return u;
 }
 
+// hilo needs to look past midnight: a "date=today" fetch stops returning
+// events once today's last high/low has already occurred (e.g. evening,
+// after the day's final low), which starves drawNowStrip()'s "next event"
+// scan and silently drops the trend arrow + NEXT HIGH/LOW block. Widen with
+// begin_date+range so tomorrow's first event is always in view.
+static String coopsRangeUrl(const char* product, const char* interval,
+                            const char* beginDate, int rangeHours) {
+  String u = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter"
+             "?station=" NOAA_STATION
+             "&datum=MLLW&units=english&time_zone=lst_ldt&format=json"
+             "&application=papercolor";
+  u += "&product=";    u += product;
+  u += "&begin_date="; u += beginDate;
+  u += "&range=";      u += rangeHours;
+  if (interval) { u += "&interval="; u += interval; }
+  return u;
+}
+
 // ------------------------------------------------------------------ fetch ---
 static bool fetchTides(Snapshot& s) {
   JsonDocument doc;
+
+  // begin_date only accepts an actual yyyyMMdd date, not the "today" keyword
+  // that the date= param supports -- NOAA returns a "Wrong Date" error
+  // otherwise. NTP has already synced by this point in the cycle.
+  char todayStr[9];
+  struct tm nowTm; time_t now = time(nullptr); localtime_r(&now, &nowTm);
+  strftime(todayStr, sizeof todayStr, "%Y%m%d", &nowTm);
 
   if (httpGetJson(coopsUrl("predictions", "h", "today"), doc)) {
     for (JsonObject p : doc["predictions"].as<JsonArray>()) {
@@ -173,13 +198,32 @@ static bool fetchTides(Snapshot& s) {
   }
   doc.clear();
 
-  if (httpGetJson(coopsUrl("predictions", "hilo", "today"), doc)) {
+  // hilo has turned out to be the flakiest of the CO-OPS calls in practice --
+  // an occasional bare HTTPS failure with no pattern tied to the range widening
+  // itself (see CLAUDE.md). Each attempt is already bounded by HTTP_TIMEOUT_MS
+  // (in httpGetJson), so retrying a fixed number of times can't hang forever.
+  // Retry the same request once, then fall back to the narrower "today" query
+  // (smaller payload, more likely to succeed) rather than leaving events empty.
+  static constexpr int HILO_RETRIES = 1;
+  bool hiloOk = false;
+  for (int attempt = 0; attempt <= HILO_RETRIES && !hiloOk; attempt++) {
+    if (attempt) { delay(500); Serial.printf("hilo retry %d\n", attempt); }
+    hiloOk = httpGetJson(coopsRangeUrl("predictions", "hilo", todayStr, 48), doc);
+  }
+  if (!hiloOk) {
+    doc.clear();
+    Serial.println("hilo range fetch failed, falling back to date=today");
+    hiloOk = httpGetJson(coopsUrl("predictions", "hilo", "today"), doc);
+  }
+  if (hiloOk) {
     for (JsonObject p : doc["predictions"].as<JsonArray>()) {
-      if (s.nEvents >= 8) break;
+      if (s.nEvents >= 10) break;
       const char* ty = p["type"];
       s.events[s.nEvents++] = { parseLocal(p["t"]), p["v"].as<float>(),
                                 ty ? ty[0] : '?' };
     }
+  } else {
+    Serial.println("hilo fallback failed too, events will be empty");
   }
   doc.clear();
 
@@ -388,10 +432,29 @@ static void drawWind(const Snapshot& s) {
   const int cx = COMPASS_CX, cy = wy + COMPASS_DY, r = COMPASS_R;
   M5.Display.drawCircle(cx, cy, r, C_BLACK);
 
+  // N/E/S/W labels around the rose, matching preview.py's compass_label_*.
+  static const char* COMPASS_LABELS[4] = {"N", "E", "S", "W"};
+  int lr = r + COMPASS_LABEL_RADIUS_OFFSET;
+  M5.Display.setFont(&fonts::DejaVu9);  // F_TINY equivalent
+  M5.Display.setTextDatum(textdatum_t::middle_center);
+  for (int i = 0; i < 4; i++) {
+    float la = radians(i * 90.0f - 90.0f);
+    M5.Display.drawString(COMPASS_LABELS[i], cx + int(cosf(la) * lr), cy + int(sinf(la) * lr));
+  }
+  M5.Display.setTextDatum(textdatum_t::top_left);
+
   float a = radians(s.windDir + 180 - 90);
   int tipx = cx + cosf(a) * (r - ARROW_TIP_INSET), tipy = cy + sinf(a) * (r - ARROW_TIP_INSET);
   int tlx  = cx - cosf(a) * (r - ARROW_TAIL_INSET), tly = cy - sinf(a) * (r - ARROW_TAIL_INSET);
   uint32_t ac = windColor(s.windNow);
+  // Without a barb, the shaft is the same width at both ends, so nothing on
+  // the panel actually marks which end is the tip -- matches preview.py's
+  // two angled strokes back from the tip (arrow_barb_angle_deg/_length).
+  float barbAngle = radians(float(ARROW_BARB_ANGLE_DEG));
+  int barbAx = tipx + int(cosf(a + barbAngle) * ARROW_BARB_LENGTH);
+  int barbAy = tipy + int(sinf(a + barbAngle) * ARROW_BARB_LENGTH);
+  int barbBx = tipx + int(cosf(a - barbAngle) * ARROW_BARB_LENGTH);
+  int barbBy = tipy + int(sinf(a - barbAngle) * ARROW_BARB_LENGTH);
   // Black underlay first, so a yellow arrow still reads against white.
   for (int pass = 0; pass < 2; pass++) {
     uint32_t col = pass ? ac : C_BLACK;
@@ -399,6 +462,10 @@ static void drawWind(const Snapshot& s) {
     for (int o = -w / 2; o <= w / 2; o++) {
       M5.Display.drawLine(tlx + o, tly, tipx + o, tipy, col);
       M5.Display.drawLine(tlx, tly + o, tipx, tipy + o, col);
+      M5.Display.drawLine(tipx + o, tipy, barbAx + o, barbAy, col);
+      M5.Display.drawLine(tipx, tipy + o, barbAx, barbAy + o, col);
+      M5.Display.drawLine(tipx + o, tipy, barbBx + o, barbBy, col);
+      M5.Display.drawLine(tipx, tipy + o, barbBx, barbBy + o, col);
     }
   }
 
@@ -590,7 +657,9 @@ void setup() {
     bool tides = fetchTides(s);
     bool wind  = fetchWind(s);
     s.ok = tides || wind;
-    Serial.printf("tides=%d wind=%d\n", tides, wind);
+    // events counted separately from `tides`, which only reflects the hourly
+    // curve fetch -- the hilo (next-event) fetch can silently fail on its own.
+    Serial.printf("tides=%d wind=%d events=%d\n", tides, wind, s.nEvents);
   } else {
     Serial.println("wifi failed");
   }
