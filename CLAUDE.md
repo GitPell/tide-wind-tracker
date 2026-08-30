@@ -5,7 +5,7 @@ coastal location. Wakes on a timer, fetches data over Wi-Fi, redraws, sleeps.
 
 ---
 
-## Current state (as of 2026-08-29)
+## Current state (as of 2026-08-30)
 
 **Works, confirmed on real hardware:**
 - Build pipeline: `pio run` regenerates `src/layout.h` from `layout.json` and
@@ -26,17 +26,12 @@ coastal location. Wakes on a timer, fetches data over Wi-Fi, redraws, sleeps.
   cycling correctly -- PM1 shutdown -> RX8130 wake -> cold boot -> full fetch
   -- at both a shortened test cadence and the production 30-minute cadence,
   including the PM1-RTC-RAM-backed cycle counter surviving real power-off.
-
-**Known issue, low severity, left as-is:**
-- The NOAA hilo (tide high/low events) fetch occasionally fails outright for
-  a single cycle -- not just "ran out of future data" (the original,
-  already-fixed bug), but the whole request failing -- which leaves that
-  cycle's NEXT HIGH/LOW block and tide-curve dots blank. Has a retry plus a
-  fallback to a narrower request, which covers the large majority of cycles
-  cleanly, but has shown up 2-for-2 immediately after a fresh reflash
-  specifically (small sample, not chased further). Cosmetic and
-  self-recovering: worst case is one 30-minute cycle showing the tide value
-  with no next-event block, corrected on the following wake.
+- The NEXT HIGH/LOW block and tide-curve dots, which had gone persistently
+  blank across many consecutive cycles -- previously misdiagnosed as an
+  occasional NOAA hilo HTTP failure (see Verified corrections below for the
+  real cause: a bad system clock, not the fetch). Root-caused and fixed
+  2026-08-30 by polling `sntp_get_sync_status()` instead of trusting
+  `getLocalTime()`; confirmed showing correctly on real hardware afterward.
 
 **Not yet exercised:**
 - Battery life / current draw. The 92.53uA standby figure is a datasheet
@@ -237,6 +232,33 @@ Grove PORT.A (HY2.0-4P): `G4`, `G5`, power direction via PM1 `BOOST5V_EN_PP`.
   true 2-axis-centered text (e.g. the compass N/E/S/W labels in `drawWind()`)
   in case future code adds a bare `drawString()` call. Confirmed by reading
   `M5GFX/src/lgfx/v1/LGFXBase.hpp` and an example `.ino`'s usage, 2026-08-29.
+
+- Arduino-ESP32's `getLocalTime()` (`esp32-hal-time.c`) does **not** mean "NTP
+  has synced" -- it just loops until `time(nullptr)`'s `tm_year > 2016`, with
+  no check that a real SNTP round-trip ever happened. On this board,
+  `M5.begin()` calls `M5.Rtc.setSystemTimeFromRtc()` internally
+  (`M5Unified.cpp _begin_rtc_imu()`, confirmed by reading source) *before*
+  Wi-Fi/NTP even starts, seeding the system clock from the RX8130's stored
+  value. If that stored value is already a plausible-looking date (any year
+  > 2016), `getLocalTime()` returns success on its very first check, `setup()`
+  then writes that same stale time straight back via `M5.Rtc.setDateTime()`,
+  and the real NTP correction (if it ever lands) applies asynchronously later
+  in the cycle via ESP-IDF's own SNTP callback -- with no guarantee it lands
+  before the rest of `setup()` reads the clock again. This was the actual
+  cause of a multi-day-long streak (not just one cycle) of the NEXT HIGH/LOW
+  block and tide-curve dots going blank: `fetchTides()`'s `todayStr` (used to
+  build the hilo `begin_date`) was computed from the stale pre-NTP clock,
+  while `drawNowStrip()`'s `now` (compared against the fetched events) read
+  the real, since-corrected clock later in the same cycle -- so every
+  fetched event legitimately compared as already in the past, even though
+  the fetch itself succeeded every time (confirmed live via a temporary
+  Serial dump of parsed event epochs vs `now`, showing events dated ~9.5
+  months before `now` despite a successful, non-retried fetch). Fixed by
+  polling the real `sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED`
+  (`esp_sntp.h`) instead of trusting `getLocalTime()` alone, before reading
+  the clock for `M5.Rtc.setDateTime()`. Confirmed by reading
+  `esp32-hal-time.c`, `M5Unified.cpp`, `RTC_Class.cpp`, and `esp_sntp.h`, and
+  by reproducing + fixing on real hardware, 2026-08-30.
 
 ---
 

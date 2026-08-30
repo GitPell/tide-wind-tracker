@@ -15,6 +15,7 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <time.h>
+#include "esp_sntp.h"  // sntp_get_sync_status() -- see setup()'s NTP-wait comment
 
 #include "config.h"
 #include "layout.h"  // GENERATED from layout.json -- see tools/gen_layout_header.py
@@ -645,8 +646,30 @@ void setup() {
 
   if (connectWifi()) {
     configTzTime(TZ_STRING, "pool.ntp.org", "time.nist.gov");
+
+    // getLocalTime() alone can't tell a genuine NTP sync from the RTC-seeded
+    // system clock M5.begin() already set via M5.Rtc.setSystemTimeFromRtc()
+    // (M5Unified.cpp _begin_rtc_imu(), runs before Wi-Fi/NTP even starts) --
+    // Arduino's getLocalTime() (esp32-hal-time.c) just checks
+    // tm_year > 2016, which a stale/wrong RTC value already satisfies before
+    // any SNTP round-trip happens. That let it report "success" off the
+    // RTC's old time and write that straight back via M5.Rtc.setDateTime()
+    // below every cycle, never actually correcting it -- root cause of the
+    // hilo next-event block silently going blank (fetched against a
+    // begin_date computed from that stale clock, then compared against the
+    // real NTP-corrected "now" once it landed later in the same cycle, so
+    // every event looked like it was already in the past). Poll the real
+    // ESP-IDF SNTP sync status instead. Confirmed by reading
+    // esp32-hal-time.c, M5Unified.cpp, RTC_Class.cpp and esp_sntp.h,
+    // 2026-08-30.
+    uint32_t sntpStart = millis();
+    while (sntp_get_sync_status() != SNTP_SYNC_STATUS_COMPLETED &&
+           millis() - sntpStart < 10000) {
+      delay(50);
+    }
+
     struct tm lt;
-    if (getLocalTime(&lt, 10000)) {
+    if (getLocalTime(&lt, 1000)) {
       // The RX8130 alarm in sleepUntilNext() schedules by its own clock, so
       // keep it synced to NTP every cycle.
       M5.Rtc.setDateTime(&lt);
