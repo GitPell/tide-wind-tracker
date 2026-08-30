@@ -10,158 +10,40 @@ coastal location. Wakes on a timer, fetches data over Wi-Fi, redraws, sleeps.
 **Works, confirmed on real hardware:**
 - Build pipeline: `pio run` regenerates `src/layout.h` from `layout.json` and
   compiles clean.
-- Full cycle: Wi-Fi connect -> NTP -> NOAA tide fetch -> Open-Meteo wind fetch
-  all succeeding (`tides=1 wind=1` in `monitor.log`).
-- Panel power-up (PM1 GPIO0 `EPD_EN`) and the full draw: header, "now strip",
-  tide curve, wind section (including the speed-color chip and the
-  hand-drawn degree ring), forecast bars, forecast label, hour-of-day ticks,
-  and footer all render correctly and are legible on the panel (device photo,
-  2026-08-29).
+- Full cycle: Wi-Fi connect -> NTP -> NOAA tide fetch -> Open-Meteo wind fetch,
+  all succeeding.
+- The complete draw: header, now-strip (tide value, trend arrow, NEXT
+  HIGH/LOW), tide curve, wind section (compass rose with N/E/S/W labels and a
+  barbed direction arrow, speed-color chip, hand-drawn degree ring), forecast
+  bars/label/hour-ticks, and footer -- all render correctly and are legible on
+  the panel, with no remaining known gaps vs. the `tools/preview.py` design
+  (`preview_only` in `layout.json` now holds only preview's own PIL
+  font-metric offsets, not missing features).
+- Real fonts throughout, replacing the original tiny `Font0` bitmap font (see
+  Verified corrections below). SHT40 indoor temp/humidity read.
+- The real low-power sleep path: `setup()` ends in `sleepUntilNext()` (PM1
+  shutdown + RX8130 wake alarm) rather than a software restart. Confirmed
+  cycling correctly -- PM1 shutdown -> RX8130 wake -> cold boot -> full fetch
+  -- at both a shortened test cadence and the production 30-minute cadence,
+  including the PM1-RTC-RAM-backed cycle counter surviving real power-off.
 
-- Real fonts throughout, replacing the tiny default `Font0` bitmap font
-  everything started out using (see Verified corrections below).
-- SHT40 indoor temp/humidity read.
+**Known issue, low severity, left as-is:**
+- The NOAA hilo (tide high/low events) fetch occasionally fails outright for
+  a single cycle -- not just "ran out of future data" (the original,
+  already-fixed bug), but the whole request failing -- which leaves that
+  cycle's NEXT HIGH/LOW block and tide-curve dots blank. Has a retry plus a
+  fallback to a narrower request, which covers the large majority of cycles
+  cleanly, but has shown up 2-for-2 immediately after a fresh reflash
+  specifically (small sample, not chased further). Cosmetic and
+  self-recovering: worst case is one 30-minute cycle showing the tide value
+  with no next-event block, corrected on the following wake.
 
-**Fixed 2026-08-29, from a device photo taken late in the day (20:05 local):**
-- **Now-strip trend arrow / NEXT HIGH·LOW block silently disappeared near the
-  end of the day.** `fetchTides()` pulled the hilo (high/low) product with
-  `date=today`, which NOAA CO-OPS scopes to the current calendar day only.
-  Once today's last high/low has already passed, `drawNowStrip()`'s "first
-  event after now" scan (`src/main.cpp` ~line 299) finds nothing, hits
-  `if (!nxt) return;`, and skips the trend triangle and the whole NEXT
-  HIGH/LOW block -- exactly what the photo showed (tide value only, big
-  blank gap, no arrow, no next event). Fixed by fetching hilo with
-  `begin_date=today&range=48` (new `coopsRangeUrl()` helper) so tomorrow's
-  first event is always in view; `events[]` bumped from 8 to 10 to hold two
-  days' worth. The hourly curve fetch (`predictions`/`h`) is intentionally
-  left on `date=today` -- unrelated to this bug and changing it would alter
-  the graph's one-day framing.
-  **Correction after first attempt:** `begin_date` does not accept the
-  `today` keyword the way `date` does -- NOAA returns
-  `{"error":{"message":" Wrong Date..."}}` for `begin_date=today`, silently
-  emptying the hilo fetch entirely (worse than the original bug). Fixed by
-  computing an actual `yyyyMMdd` string from `localtime_r` (main.cpp) /
-  `dt.date.today()` (preview.py) instead. Applied the identical fix to
-  `tools/preview.py`'s `live()` function, which had the same `date=today`
-  bug (its docstring says it mirrors the firmware's requests exactly).
-  Verified with `python tools/preview.py --live`: NEXT HIGH now correctly
-  resolves to tomorrow's 01:10 event when today's last low (18:55) has
-  already passed. Confirmed against a direct curl of the NOAA endpoint
-  before and after.
-- **Hour-of-day tick labels under the forecast bars collided with the footer
-  row.** `forecast.bottom` (572) + `hour_label_dy` (9) put tick text at y=581,
-  overlapping `footer.y` (583) by ~8px; the footer's opaque background erased
-  whichever tick labels shared its horizontal span, leaving only the one tick
-  that happened to fall in the gap between the two footer strings (explains
-  the lone stray "12" in the photo). Fixed in `layout.json`: `forecast.bottom`
-  566, `hour_label_dy` 8, `footer.y` 587 -- reopens a real gap between the two
-  rows.
-
-**Both fixes confirmed on real hardware, 2026-08-29 (reflashed and
-photographed same day):** the NEXT HIGH/LOW block with trend arrow renders
-correctly, and the hour-tick row no longer collides with the footer.
-
-One unrelated wrinkle hit during that same flash/photo session: the header
-briefly showed a wildly wrong date ("Sun 07 Dec 19:30" instead of the actual
-Aug 29). Not caused by these fixes -- neither touches Wi-Fi/NTP/RTC code --
-and three live-monitored cycles around that time all had NTP succeed
-(`getLocalTime()` true, no `ntp failed` in the log) between the device's
-correct first photo and the bad one, so the actual header-drawing code path
-wasn't at fault either. Most likely a transient glitch from the repeated
-back-to-back reflash/monitor-attach churn during that debugging session
-(possibly a brief power blip over USB). **Self-corrected on the next cycle
-without any code change** -- watch for recurrence, but don't treat it as a
-standing bug unless it comes back.
-
-**Added 2026-08-29:** compass N/E/S/W labels around the wind circle in
-`main.cpp`, matching `preview.py`. `compass_label_radius_offset` moved out of
-`layout.json`'s `preview_only.wind` into the shared `wind` section since both
-consumers now draw it. Uses `M5.Display.setTextDatum(middle_center)` for
-true 2-axis centering (reset back to `top_left` right after, since the rest
-of the file's `setCursor()+print()` calls don't touch datum but a future bare
-`drawString()` would). **Confirmed on real hardware, 2026-08-29** -- labels
-render cleanly, clear of both the ring and the arrow.
-
-While confirming the compass, a device photo showed the NEXT HIGH/LOW block
-missing again -- this time with zero hi/lo dots on the tide curve too,
-meaning the *entire* hilo fetch failed for that one cycle (not just "ran out
-of future data" like the original bug). Added `events=%d` to the
-`tides=%d wind=%d` log line (`fetchTides()`'s return value only ever reflected
-the separate hourly-curve fetch, so hilo failures were previously invisible)
-and watched several more cycles: hilo came back with `events=7` or `8` every
-time after that, so the empty-block photo was very likely a one-off transient
-HTTPS failure (this codebase already has a standing comment about the NOAA
-station "being offline... more often than you'd hope" -- see the
-`water_level` fallback a few lines below `fetchTides()`'s hilo call).
-**Added a matching retry/fallback for hilo, 2026-08-29:** retry the same
-widened request once (`HILO_RETRIES = 1`, with a 500ms pause), and if that
-still fails, fall back to the narrower `date=today` request (smaller payload,
-more likely to succeed, though it reintroduces the original end-of-day gap
-only in that worst case) rather than leaving `events` empty. Each attempt is
-already bounded by the existing per-request `HTTP_TIMEOUT_MS` (15s), so the
-retry+fallback path can add at most ~2 more timeouts to a cycle if
-connectivity is genuinely down -- it can't hang indefinitely. Verified two
-more live cycles (128, 129) both got `events=8` with zero retries logged, so
-the common path is unaffected.
-
-Then, immediately after flashing the barbed-arrowhead change (below), the
-*very first* post-flash cycle showed the identical empty-events symptom a
-second time -- 2-for-2 across both reflashes so far, though in both cases the
-serial monitor wasn't attached yet to catch whether retry/fallback actually
-fired. Checked the ArduinoJson source directly to rule out a stale-`doc`
-bug across retries: `deserializeJson()` calls `dst.clear()` before parsing
-every time (`Deserialization/deserialize.hpp` ~line 51), so reusing the same
-`JsonDocument` across attempts is safe. Watched three more cycles (133, 134,
-135) immediately after and all three got `events=7` on the first attempt --
-no retries needed. **Decision: leave as-is.** The fix is logically sound and
-normal cycles are unaffected; a single missed cycle is cosmetic (tide value
-still shows, NEXT HIGH/LOW just doesn't) and self-recovers on the next
-30-minute wake. If the empty-events symptom keeps appearing specifically
-right after a flash (small sample so far, but worth watching), that would
-point at something boot-adjacent rather than pure network flakiness --
-worth revisiting with the serial monitor attached *before* the first
-post-flash cycle if it recurs.
-
-**Added 2026-08-29:** the barbed wind arrowhead. Without it, the arrow shaft
-was the same width at both ends, so nothing on the panel actually marked
-which end was the tip -- a user noticed this directly on a device photo (the
-arrow just looked like a plain double-ended bar). Ported preview.py's two
-angled strokes back from the tip (`arrow_barb_angle_deg`/`arrow_barb_length`,
-moved from `layout.json`'s `preview_only.wind` into the shared `wind` section
-since both consumers now draw it), reusing the existing black-underlay-then-
-color thick-line trick already used for the shaft. **Confirmed on real
-hardware, 2026-08-29** -- renders as a clear, unambiguous arrowhead.
-
-No remaining known gaps vs. the `tools/preview.py` design -- `preview_only`
-now holds only preview's own PIL font-metric offsets, not missing features.
-
-**Real low-power sleep path confirmed on real hardware, 2026-08-29.**
-`setup()` now ends with `sleepUntilNext()` (the `delay(60000); ESP.restart();`
-software-restart stand-in is gone). Validated by temporarily dropping
-`UPDATE_MINUTES` to 2 in `config.h` (board was on USB power throughout, not
-battery, so this was safe -- reverted to 30 before reflashing for production)
-and polling `Win32_PnPEntity` for the board's `USB Serial Device (COM4)` to
-vanish and reappear, since PM1 fully cutting power means the native-USB CDC
-port disappears from Windows entirely between cycles (`pio device monitor`'s
-own port auto-detect isn't reliable here -- it latched onto an unrelated
-"Intel Active Management Technology - SOL (COM3)" once when the board was
-off; pass `--port COM4` / `--upload-port COM4` explicitly and confirm the
-board's port with `Get-CimInstance Win32_PnPEntity` first). Observed COM4
-vanish and reappear on schedule across multiple cycles, and confirmed via
-serial log that a woken cycle is a genuine cold boot with a working fetch
-(`=== cycle 161 ===`, `tides=1 wind=1 events=8`) -- not a crash loop. This
-also confirms the PM1-RTC-RAM-backed cycle counter (`nextCycleCount()`)
-survives real power-off, since it kept incrementing across the observed
-wake cycles (158 -> 161 across the test window). Reflashed with
-`UPDATE_MINUTES` back to 30 (production value) once confirmed; the first
-post-revert cycle (162) also completed cleanly.
-
-**Not yet exercised at all:**
+**Not yet exercised:**
 - Battery life / current draw. The 92.53uA standby figure is a datasheet
   target derived from reading the reference firmware, not a measurement on
   this board.
 
-**Next steps, roughly in order:**
+**Next steps:**
 1. Measure real standby/active current and run a multi-day battery soak test.
 
 ---
@@ -294,7 +176,11 @@ Grove PORT.A (HY2.0-4P): `G4`, `G5`, power direction via PM1 `BOOST5V_EN_PP`.
   falling edge, wake-enable), schedule an RX8130 alarm
   (`M5.Rtc.setAlarmIRQ()`), then call `pm1.shutdown()`. This cuts power to
   the whole board, and the RX8130 alarm re-powers it via the PM1's external
-  wake input. Confirmed by reading source, 2026-08-28.
+  wake input. Confirmed by reading source, 2026-08-28. **Confirmed working
+  on real hardware, 2026-08-29**: `setup()` now calls `sleepUntilNext()` for
+  real, and the board was observed cycling PM1 shutdown -> RX8130 wake ->
+  cold boot -> full fetch cycle repeatedly at both a shortened 2-minute test
+  cadence and the production 30-minute cadence.
 
 - Because that shutdown is a real power cut, **nothing in RAM survives
   between cycles** — `RTC_DATA_ATTR` resets just like a cold boot, since the
@@ -311,6 +197,46 @@ Grove PORT.A (HY2.0-4P): `G4`, `G5`, power direction via PM1 `BOOST5V_EN_PP`.
   it's kept synced (`M5.Rtc.setDateTime()`) whenever NTP does succeed.
   Matches `Hal::scheduleNextWakeMinutes()` in the reference demo. Confirmed
   by reading source, 2026-08-28.
+
+- On this Windows dev machine, `pio device monitor`'s upload/monitor port
+  auto-detect is **not reliable** once the board's native USB CDC has
+  actually vanished (i.e. mid-PM1-shutdown) -- it can silently latch onto an
+  unrelated port (seen once: "Intel Active Management Technology - SOL
+  (COM3)", a chipset management interface, not the board) and produce a
+  monitor session that looks normal but never shows any real output. To
+  watch for or flash during a real sleep/wake cycle: poll
+  `Get-CimInstance -ClassName Win32_PnPEntity | Where-Object { $_.Name -match
+  'USB Serial Device' }` to see the board's actual COM port appear/disappear,
+  and pass `--port`/`--upload-port` explicitly (e.g. `COM4`) rather than
+  trusting auto-detect. Confirmed 2026-08-29 while validating the sleep path.
+
+- NOAA CO-OPS's `begin_date` parameter does **not** accept the `today`
+  keyword the way the plain `date` parameter does -- `begin_date=today`
+  returns `{"error":{"message":" Wrong Date..."}}` and silently empties the
+  response (confirmed with a direct `curl` against the live endpoint).
+  Compute an actual `yyyyMMdd` string instead (`strftime(..., "%Y%m%d", ...)`
+  in `main.cpp`, `dt.date.today().strftime("%Y%m%d")` in `preview.py`) when
+  using `begin_date`+`range` to widen a query past what `date=today` covers.
+  Confirmed 2026-08-29.
+
+- ArduinoJson's `deserializeJson(doc, ...)` calls `dst.clear()` internally
+  before parsing, every time (`Deserialization/deserialize.hpp`,
+  `doDeserialize()`) -- so reusing the same `JsonDocument` across sequential
+  HTTP retry attempts is safe; a failed attempt can't leave stale/partial
+  data that a later successful attempt would merge with. Confirmed by
+  reading source, 2026-08-29.
+
+- M5GFX's `setTextDatum()` only affects the bare 2-arg-position
+  `drawString(str, x, y)` call (it reads the persisted `_text_style.datum`).
+  `drawCenterString()`/`drawRightString()` pass their own explicit datum
+  override per call and ignore whatever `setTextDatum()` last set, and
+  `setCursor()`+`print()` ignores datum entirely (it's cursor-based, not
+  anchor-based) -- so existing `print()`/`drawRightString()` call sites don't
+  need to change around a `setTextDatum()` call, but it's still good hygiene
+  to reset to `textdatum_t::top_left` right after using `middle_center` for
+  true 2-axis-centered text (e.g. the compass N/E/S/W labels in `drawWind()`)
+  in case future code adds a bare `drawString()` call. Confirmed by reading
+  `M5GFX/src/lgfx/v1/LGFXBase.hpp` and an example `.ino`'s usage, 2026-08-29.
 
 ---
 
@@ -416,8 +342,7 @@ Pixel coordinates (box positions, radii, offsets -- not colors, fonts, or text)
 live in `layout.json`, not in `tools/preview.py` or `src/main.cpp` directly.
 Change layout there; `pio run` regenerates `src/layout.h` automatically via
 the `extra_scripts` hook in `platformio.ini`, and `preview.py` reads
-`layout.json` itself at runtime. `layout.json` still documents (in its
-`preview_only` section) two elements `preview.py` renders that `main.cpp`
-does not implement -- compass cardinal labels and the barbed wind
-arrowhead. See "Current state" at the top of this file for what's confirmed
-working on real hardware versus just built.
+`layout.json` itself at runtime. `layout.json`'s `preview_only` section now
+holds only elements specific to `preview.py`'s own PIL rendering (font-metric
+offsets), not features missing from `main.cpp` -- see "Current state" at the
+top of this file for what's confirmed working on real hardware.
