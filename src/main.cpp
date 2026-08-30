@@ -670,9 +670,7 @@ void setup() {
   }
 
   drawAll(s);
-  // TODO: restore before battery testing
-  delay(60000);
-  ESP.restart();
+  sleepUntilNext();
 }
 
 void loop() {}   // never reached; setup() ends in deep sleep

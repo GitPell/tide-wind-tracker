@@ -135,22 +135,34 @@ hardware, 2026-08-29** -- renders as a clear, unambiguous arrowhead.
 No remaining known gaps vs. the `tools/preview.py` design -- `preview_only`
 now holds only preview's own PIL font-metric offsets, not missing features.
 
+**Real low-power sleep path confirmed on real hardware, 2026-08-29.**
+`setup()` now ends with `sleepUntilNext()` (the `delay(60000); ESP.restart();`
+software-restart stand-in is gone). Validated by temporarily dropping
+`UPDATE_MINUTES` to 2 in `config.h` (board was on USB power throughout, not
+battery, so this was safe -- reverted to 30 before reflashing for production)
+and polling `Win32_PnPEntity` for the board's `USB Serial Device (COM4)` to
+vanish and reappear, since PM1 fully cutting power means the native-USB CDC
+port disappears from Windows entirely between cycles (`pio device monitor`'s
+own port auto-detect isn't reliable here -- it latched onto an unrelated
+"Intel Active Management Technology - SOL (COM3)" once when the board was
+off; pass `--port COM4` / `--upload-port COM4` explicitly and confirm the
+board's port with `Get-CimInstance Win32_PnPEntity` first). Observed COM4
+vanish and reappear on schedule across multiple cycles, and confirmed via
+serial log that a woken cycle is a genuine cold boot with a working fetch
+(`=== cycle 161 ===`, `tides=1 wind=1 events=8`) -- not a crash loop. This
+also confirms the PM1-RTC-RAM-backed cycle counter (`nextCycleCount()`)
+survives real power-off, since it kept incrementing across the observed
+wake cycles (158 -> 161 across the test window). Reflashed with
+`UPDATE_MINUTES` back to 30 (production value) once confirmed; the first
+post-revert cycle (162) also completed cleanly.
+
 **Not yet exercised at all:**
-- The real low-power sleep path. `setup()` currently ends with
-  `delay(60000); ESP.restart();` (look for the `// TODO: restore before
-  battery testing` comment) instead of calling `sleepUntilNext()`. Every test
-  cycle so far has been a software restart, not a real PM1 shutdown + RX8130
-  wake -- the actual cold-boot-every-cycle path, and the PM1-RTC-RAM-backed
-  full-refresh counter that depends on it, has never run on this hardware.
 - Battery life / current draw. The 92.53uA standby figure is a datasheet
   target derived from reading the reference firmware, not a measurement on
   this board.
 
 **Next steps, roughly in order:**
-1. Swap `delay(60000); ESP.restart();` back for `sleepUntilNext()` and
-   confirm on real hardware that the board actually wakes on schedule via
-   the RX8130 alarm.
-2. Measure real standby/active current and run a multi-day battery soak test.
+1. Measure real standby/active current and run a multi-day battery soak test.
 
 ---
 
