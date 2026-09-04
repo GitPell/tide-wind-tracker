@@ -32,6 +32,12 @@ coastal location. Wakes on a timer, fetches data over Wi-Fi, redraws, sleeps.
   real cause: a bad system clock, not the fetch). Root-caused and fixed
   2026-08-30 by polling `sntp_get_sync_status()` instead of trusting
   `getLocalTime()`; confirmed showing correctly on real hardware afterward.
+- Rendering is canvas-buffered (`src/main.cpp`, 2026-09-04): `drawAll()`
+  composes the full frame into an off-screen `M5Canvas` and pushes it with a
+  single `pushSprite()` + one `display()` call, instead of each primitive
+  drawing straight to `M5.Display`. Confirmed on real hardware: correct
+  visual output, and canvas allocation shifts `ESP.getFreeHeap()` by only 64
+  bytes (buffer lives in PSRAM -- see Verified corrections).
 
 **Not yet exercised:**
 - Battery life / current draw. The 92.53uA standby figure is a datasheet
@@ -260,6 +266,41 @@ Grove PORT.A (HY2.0-4P): `G4`, `G5`, power direction via PM1 `BOOST5V_EN_PP`.
   `esp32-hal-time.c`, `M5Unified.cpp`, `RTC_Class.cpp`, and `esp_sntp.h`, and
   by reproducing + fixing on real hardware, 2026-08-30.
 
+- Since the canvas-buffered rewrite (`src/main.cpp`, 2026-09-04), the six
+  `C_BLACK/C_WHITE/C_RED/C_YELLOW/C_BLUE/C_GREEN` constants are **palette
+  indices (0-5)**, not RGB values. The render target is an `M5Canvas` at
+  `color_depth_t::palette_4bit`, and LGFX_Sprite's palette-mode draw calls
+  take a palette index as the "color" argument -- confirmed by reading
+  `misc/colortype.hpp`'s `convert_uint32_to_palette4()`, which just extracts
+  the low nibble of whatever is passed. The real RGB values live in
+  `PALETTE_RGB[6]`, consumed only by `canvas.createPalette()`. **Hazard:**
+  passing `C_WHITE` etc. straight to `M5.Display` (still true RGB888) is not
+  white, it's near-black (`0x000001`). Any new direct-to-`M5.Display` draw
+  call must not reuse these constants -- route it through the canvas instead
+  (see `clearScreenFull()`).
+
+- `M5Canvas(&M5.Display)` defaults `_psram = true` (`M5GFX.h`), so
+  `createSprite()` allocates from the 8MB PSRAM, not the ~320KB internal
+  heap. Confirmed on real hardware 2026-09-04: a 400x600 `palette_4bit`
+  canvas (120000 bytes) moved `ESP.getFreeHeap()` by only 64 bytes. Draws to
+  the canvas never touch the panel or trigger a refresh -- only the final
+  `pushSprite()` + `display()` do.
+
+- `Panel_ED2208::display()` nearest-matches every RGB888 pixel against its
+  own native 6-color table (`epd_palette[]` in `Panel_ED2208.cpp`) with an
+  ordered Bayer dither, independent of whatever wrote the RGB888 -- and that
+  table's ideal blue/green (`{100,64,255}`, `{67,138,28}`) don't exactly
+  equal this project's `PALETTE_RGB` blue/green (`0x0000BF`, `0x007C00`).
+  This was already true before the canvas rewrite; "pixel-identical" output
+  was never about exact color-value equality, only about delivering the same
+  RGB888 bytes into `M5.Display`'s framebuffer that direct-draw always
+  produced. Confirmed by reading `Panel_ED2208.cpp`, 2026-09-04.
+
+- The canvas buffer is the deterministic artifact for automated
+  verification -- it's what a test harness should dump and compare.
+  Physical panel output is not comparable byte-for-byte, because of the
+  dithering above.
+
 ---
 
 ## Design constraints for this project
@@ -345,6 +386,13 @@ python tools/preview.py       # regenerate the layout preview PNG
 
 You (Claude) can and should run these directly. Read the compiler output and
 the serial log yourself rather than asking the user to paste them.
+
+- Uploading requires a physical power-button press on the board first --
+  `pio run -t upload` cannot reach a bootloader that isn't listening. If
+  upload or the post-upload serial connect fails, **stop and ask the user to
+  press the button** rather than retrying; retrying blind against a board
+  that isn't in bootloader mode wastes time and can mask a real problem.
+  Confirmed necessary during the canvas-render session, 2026-09-04.
 
 ---
 
