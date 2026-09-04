@@ -5,3 +5,5 @@ src/config.h
 
 monitor.log
 *.zip
+
+.vscode/
