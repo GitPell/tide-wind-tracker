@@ -62,6 +62,15 @@ struct Snapshot {
   float indoorC = 0, indoorRh = 0;
   int   battery = 0;
   bool  ok = false;
+  // Sampled once in setup(), after the Wi-Fi/SNTP attempt (whether or not it
+  // succeeded) and before any drawing -- every draw function reads this
+  // instead of calling time(nullptr) itself, so the render is a pure
+  // function of Snapshot and every clock-dependent element (header/footer
+  // clock, tide now-line, next-event pick) agrees with the others. Without
+  // this, each draw function sampling time(nullptr) independently could
+  // straddle a minute (or, for the now-line vs. next-event pick, an actual
+  // event boundary) if the wall clock ticked over mid-render.
+  time_t now = 0;
 };
 
 // The board fully cuts power between cycles (see sleepUntilNext()), so
@@ -314,8 +323,7 @@ static void drawHeader(M5Canvas& gfx, const Snapshot& s) {
   gfx.print(STATION_LABEL);
 
   char buf[40];
-  time_t now = time(nullptr);
-  struct tm lt; localtime_r(&now, &lt);
+  struct tm lt; localtime_r(&s.now, &lt);
   strftime(buf, sizeof buf, "%a %d %b  %H:%M", &lt);
   gfx.setFont(&fonts::DejaVu12);  // F_SMALL equivalent
   gfx.setCursor(DATETIME_X, DATETIME_Y);
@@ -354,10 +362,9 @@ static void drawNowStrip(M5Canvas& gfx, const Snapshot& s) {
 
   // Next tide event strictly after now, mirroring preview.py's "rising"/"nxt"
   // scan over the hilo events.
-  time_t now = time(nullptr);
   const TideEvent* nxt = nullptr;
   for (int i = 0; i < s.nEvents; i++) {
-    if (s.events[i].t > now) { nxt = &s.events[i]; break; }
+    if (s.events[i].t > s.now) { nxt = &s.events[i]; break; }
   }
   if (!nxt) return;
 
@@ -431,7 +438,7 @@ static void drawTide(M5Canvas& gfx, const Snapshot& s) {
     gfx.drawCircle(x, y, EVENT_MARKER_RADIUS, C_BLACK);
   }
 
-  int nx = px(constrain(time(nullptr), t0, t1));
+  int nx = px(constrain(s.now, t0, t1));
   for (int i = 0; i < NOW_LINE_WIDTH; i++) {
     gfx.drawFastVLine(nx + i, y0, y1 - y0, C_RED);
   }
@@ -546,7 +553,6 @@ static void drawForecast(M5Canvas& gfx, const Snapshot& s) {
 }
 
 static void drawFooter(M5Canvas& gfx, const Snapshot& s) {
-  (void)s;
   using namespace layout::footer;
   gfx.setTextColor(C_BLACK, C_WHITE);
   gfx.setFont(&fonts::DejaVu9);  // F_TINY equivalent
@@ -555,8 +561,7 @@ static void drawFooter(M5Canvas& gfx, const Snapshot& s) {
   // hyphen in place of preview.py's "·".
   gfx.print("NOAA CO-OPS - Open-Meteo");
 
-  time_t now = time(nullptr);
-  struct tm lt; localtime_r(&now, &lt);
+  struct tm lt; localtime_r(&s.now, &lt);
   char buf[16];
   strftime(buf, sizeof buf, "UPD %H:%M", &lt);
   gfx.drawRightString(buf, SCREEN_W - RIGHT_MARGIN, Y);
@@ -746,6 +751,11 @@ void setup() {
   } else {
     Serial.println("wifi failed");
   }
+
+  // Sampled once, after the Wi-Fi/SNTP attempt whether or not it succeeded,
+  // so every draw function sees the same "now" instead of each calling
+  // time(nullptr) independently (see Snapshot::now).
+  s.now = time(nullptr);
 
   if (cycle % FULL_REFRESH_EVERY == 1) {
     clearScreenFull();           // ghost-clearing pass
