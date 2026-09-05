@@ -1,0 +1,12 @@
+{
+  "_comment": "Single source of truth for the six Spectra 6 panel colors, shared by src/main.cpp (via generated src/layout.h -- see tools/gen_layout_header.py), tools/preview.py, and tools/hil.py. Both Python tools read this file directly at runtime; the C++ side gets it baked into src/layout.h the same way layout.json's geometry does. Array order is load-bearing: it must match the C_BLACK..C_GREEN palette indices hand-defined in src/main.cpp (0=black, 1=white, 2=red, 3=yellow, 4=blue, 5=green) and the palette_4bit index every pixel in the canvas buffer is written as. Edit this file, not any hardcoded copy -- there should be no other copy.",
+
+  "colors": [
+    { "name": "black",  "hex": "#000000" },
+    { "name": "white",  "hex": "#FFFFFF" },
+    { "name": "red",    "hex": "#BF0000" },
+    { "name": "yellow", "hex": "#FFF338" },
+    { "name": "blue",   "hex": "#0000BF" },
+    { "name": "green",  "hex": "#007C00" }
+  ]
+}

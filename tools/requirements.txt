@@ -1,0 +1,15 @@
+# Third-party dependencies for tools/hil.py and tools/preview.py.
+# Checked against each file's actual imports, not assumed -- see:
+#   hil.py:     serial, serial.tools.list_ports, PIL (Image, ImageChops)
+#   preview.py: PIL (Image, ImageDraw, ImageFont); requests, only inside
+#               fetch_live() for `preview.py --live` (skip it and you can
+#               skip requests too, but it's listed here for completeness).
+# Everything else either file imports (argparse, base64, json, sys, time,
+# pathlib, datetime, math, os) is standard library.
+#
+# Floors are what this was developed/tested against; ceilings just keep out
+# an unreleased next major version, not today's.
+
+pyserial>=3.5,<4
+Pillow>=10.0,<13
+requests>=2.31,<3

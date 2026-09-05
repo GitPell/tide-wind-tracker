@@ -13,7 +13,7 @@ that file to move things, not the literals that used to be inline here.
     python tools/preview.py --live       # fetch real NOAA + Open-Meteo data
     python tools/preview.py --check      # assert every pixel is on-palette
 
-Requires: pillow  (and requests, for --live)
+Requires: see tools/requirements.txt (pip install -r tools/requirements.txt)
 """
 
 import argparse
@@ -43,18 +43,22 @@ LAYOUT = json.loads((Path(__file__).resolve().parent.parent / "layout.json").rea
 W, H = LAYOUT["screen"]["w"], LAYOUT["screen"]["h"]
 
 # --- Spectra 6 palette -------------------------------------------------------
-# Approximate sRGB values for the six achievable colors. Tune these against a
-# photo of the real panel; they only affect how faithful the preview looks, not
-# what the device does.
+# palette.json is the single source of truth for these six colors, shared
+# with src/main.cpp (baked into generated src/layout.h by
+# tools/gen_layout_header.py) and tools/hil.py. Read at runtime rather than
+# hardcoded here so the preview can't silently drift from what the firmware
+# actually renders.
 
-BLACK = (0, 0, 0)
-WHITE = (255, 255, 255)
-RED = (191, 0, 0)
-YELLOW = (255, 243, 56)
-BLUE = (0, 0, 191)
-GREEN = (0, 124, 0)
+_PALETTE_JSON = json.loads((Path(__file__).resolve().parent.parent / "palette.json").read_text())
 
-PALETTE = [BLACK, WHITE, RED, YELLOW, BLUE, GREEN]
+
+def _hex_to_rgb(h):
+    h = h.lstrip("#")
+    return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+
+
+PALETTE = [_hex_to_rgb(c["hex"]) for c in _PALETTE_JSON["colors"]]
+BLACK, WHITE, RED, YELLOW, BLUE, GREEN = PALETTE
 
 # --- Fonts -------------------------------------------------------------------
 

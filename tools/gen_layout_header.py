@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Generate src/layout.h from layout.json.
+Generate src/layout.h from layout.json and palette.json.
 
 layout.json is the single source of truth for pixel geometry shared by
-tools/preview.py and src/main.cpp. This script turns it into a C++ header of
-nested namespaces and constexpr ints. It runs automatically before every
-`pio run` (see the extra_scripts hook in platformio.ini); it can also be run
-standalone:
+tools/preview.py and src/main.cpp; palette.json is the same for the six
+Spectra 6 panel colors, also shared with tools/hil.py. This script turns both
+into a single C++ header of nested namespaces and constexpr values. It runs
+automatically before every `pio run` (see the extra_scripts hook in
+platformio.ini); it can also be run standalone:
 
     python tools/gen_layout_header.py
 
@@ -28,6 +29,7 @@ except NameError:
     ROOT = Path(__file__).resolve().parent.parent
 
 LAYOUT_JSON = ROOT / "layout.json"
+PALETTE_JSON = ROOT / "palette.json"
 OUT_HEADER = ROOT / "src" / "layout.h"
 
 SKIP_TOP_LEVEL = {"preview_only"}
@@ -53,10 +55,25 @@ def emit(name, value, indent):
     return f"{pad}constexpr int {name.upper()} = {int(value)};"
 
 
+def emit_palette(indent):
+    pad = "  " * indent
+    colors = json.loads(PALETTE_JSON.read_text())["colors"]
+    values = []
+    for c in colors:
+        hexstr = c["hex"].lstrip("#")
+        if len(hexstr) != 6:
+            raise ValueError(f"palette.json: color {c!r} hex must be 6 hex digits")
+        values.append(f"0x{int(hexstr, 16):06X}")
+    lines = [f"{pad}namespace palette {{"]
+    lines.append(f"{pad}  constexpr uint32_t RGB[{len(values)}] = {{ {', '.join(values)} }};")
+    lines.append(f"{pad}}}")
+    return "\n".join(lines)
+
+
 def generate():
     layout = json.loads(LAYOUT_JSON.read_text())
 
-    body = []
+    body = [emit_palette(1)]
     for key, value in layout.items():
         if key.startswith("_") or key in SKIP_TOP_LEVEL:
             continue
@@ -64,10 +81,13 @@ def generate():
 
     header = f"""\
 // GENERATED FILE -- do not edit by hand.
-// Regenerated from {LAYOUT_JSON.relative_to(ROOT).as_posix()} by
-// tools/gen_layout_header.py, run automatically by `pio run`
-// (see extra_scripts in platformio.ini). Edit layout.json instead.
+// Regenerated from {LAYOUT_JSON.relative_to(ROOT).as_posix()} and
+// {PALETTE_JSON.relative_to(ROOT).as_posix()} by tools/gen_layout_header.py,
+// run automatically by `pio run` (see extra_scripts in platformio.ini).
+// Edit those files instead.
 #pragma once
+
+#include <cstdint>
 
 namespace layout {{
 {chr(10).join(body)}
@@ -76,7 +96,8 @@ namespace layout {{
 
     OUT_HEADER.write_text(header)
     print(f"generated {OUT_HEADER.relative_to(ROOT).as_posix()} "
-          f"from {LAYOUT_JSON.relative_to(ROOT).as_posix()}")
+          f"from {LAYOUT_JSON.relative_to(ROOT).as_posix()} and "
+          f"{PALETTE_JSON.relative_to(ROOT).as_posix()}")
 
 
 generate()

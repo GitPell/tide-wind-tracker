@@ -7,3 +7,5 @@ monitor.log
 *.zip
 
 .vscode/
+
+__pycache__/

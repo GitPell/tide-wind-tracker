@@ -1,10 +1,16 @@
 // GENERATED FILE -- do not edit by hand.
-// Regenerated from layout.json by
-// tools/gen_layout_header.py, run automatically by `pio run`
-// (see extra_scripts in platformio.ini). Edit layout.json instead.
+// Regenerated from layout.json and
+// palette.json by tools/gen_layout_header.py,
+// run automatically by `pio run` (see extra_scripts in platformio.ini).
+// Edit those files instead.
 #pragma once
 
+#include <cstdint>
+
 namespace layout {
+  namespace palette {
+    constexpr uint32_t RGB[6] = { 0x000000, 0xFFFFFF, 0xBF0000, 0xFFF338, 0x0000BF, 0x007C00 };
+  }
   namespace screen {
     constexpr int W = 400;
     constexpr int H = 600;

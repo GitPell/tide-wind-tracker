@@ -5,7 +5,7 @@ coastal location. Wakes on a timer, fetches data over Wi-Fi, redraws, sleeps.
 
 ---
 
-## Current state (as of 2026-08-30)
+## Current state (as of 2026-09-05)
 
 **Works, confirmed on real hardware:**
 - Build pipeline: `pio run` regenerates `src/layout.h` from `layout.json` and
@@ -42,10 +42,19 @@ coastal location. Wakes on a timer, fetches data over Wi-Fi, redraws, sleeps.
 **Not yet exercised:**
 - Battery life / current draw. The 92.53uA standby figure is a datasheet
   target derived from reading the reference firmware, not a measurement on
-  this board.
+  this board. Worse than merely unmeasured as of 2026-09-05: the awake side
+  of the budget is now **known wrong** -- see "Design constraints" below and
+  the `M5.begin()` entry in "Verified corrections". Real measured awake time
+  is ~78s/cycle against an assumed ~20s.
 
 **Next steps:**
-1. Measure real standby/active current and run a multi-day battery soak test.
+1. Measure real standby/active current and run a multi-day battery soak
+   test -- more urgent now that measured awake time (~78s/cycle) is ~4x the
+   assumed figure the existing battery estimate was built on.
+2. Narrow the ~33s unexplained remainder inside `M5Unified`'s `_begin(cfg)`
+   (RTC/IMU/mic/speaker already ruled out -- see "Verified corrections").
+   Use header-inlined `millis()` bracketing, not `ESP_LOG*` or new prints in
+   a vendored `.cpp` file -- confirmed dead on this build, see below.
 
 ---
 
@@ -301,6 +310,71 @@ Grove PORT.A (HY2.0-4P): `G4`, `G5`, power direction via PM1 `BOOST5V_EN_PP`.
   Physical panel output is not comparable byte-for-byte, because of the
   dithering above.
 
+- `Snapshot` carries a `time_t now` field, sampled exactly once in
+  `setup()` right after the `connectWifi()` conditional (unconditionally,
+  so a Wi-Fi-failure cycle still gets a valid clock). All four draw
+  functions read `s.now` instead of calling `time(nullptr)` independently
+  -- that previously let the header clock, next-event label, tide
+  now-line, and footer disagree if the render straddled a minute boundary.
+  Consequence: the render path is a pure function of `Snapshot` with no
+  wall-clock dependency, which is what makes reproducible automated
+  rendering possible. Confirmed by reading source, 2026-09-04.
+
+- `M5.begin()` costs **~50 seconds on every single boot** -- on both
+  `m5stack-papercolor` and `m5stack-papercolor-test`, not a TIER1_TEST
+  artifact. Measured with `millis()` bracketing in `setup()` (both envs) and
+  confirmed live across roughly ten separate boots (test and production
+  combined), consistently landing in the 50.3-50.5 second range. Splits into
+  two phases, bracketed the same way inside `M5Unified::begin()`
+  (`M5Unified.hpp`):
+  - `Display.init()` (board/panel autodetection): ~17s.
+  - `_begin(cfg)` (RTC/IMU/audio/power init): ~33s.
+  Disabling `cfg.internal_rtc`, `internal_imu`, `internal_mic`, and
+  `internal_spk` together (all four, at once, in `src/main.cpp`'s
+  `TIER1_TEST` branch) changed neither number by a single millisecond across
+  multiple trials -- **all four subsystems are ruled out**. `Power_Class`
+  PMIC auto-probing (M5Stack boards commonly try several possible PMIC chip
+  types before matching the real one) is the next candidate for the ~33s
+  remainder, unconfirmed. This cost is currently unavoidable and not
+  reducible by any config flag found so far -- it is a real property of
+  `M5.begin()` on this board as used today, not a test-harness artifact.
+  Confirmed live on real hardware (both envs, including two independent
+  production wake cycles), 2026-09-05.
+
+- Raw `ESP_LOG*` calls inside vendored library `.cpp` files (confirmed for
+  `M5GFX.cpp`; `M5Unified.cpp` uses no `ESP_LOG` tag at all) **do not reach
+  the USB CDC console on this build, by any mechanism tried**. Five
+  independent attempts, all negative: (1) `-DCORE_DEBUG_LEVEL=5` globally --
+  made things *worse* by unlocking `log_v()`/`log_d()` framework-wide
+  (I2C/SPI/PSRAM internals, not just the library of interest), flooding even
+  a 32KB TX buffer during the ~50s `M5.begin()` window and evicting lines
+  that previously showed reliably; (2) scoped
+  `esp_log_level_set("M5GFX", ESP_LOG_VERBOSE)` alone (traced the actual
+  runtime gate to `esp32-hal-misc.c`'s unconditional
+  `esp_log_level_set("*", CONFIG_LOG_DEFAULT_LEVEL)`, with
+  `CONFIG_LOG_DEFAULT_LEVEL` baked into the precompiled framework's
+  `sdkconfig.h` as `1`/ERROR-only -- confirmed by reading
+  `tools/sdk/esp32s3/qio_opi/include/sdkconfig.h`); (3) `(2)` plus
+  `Serial.setDebugOutput(true)` (traced through `HWCDC::setDebugOutput()`'s
+  `ets_install_putc2()` mechanism in `HWCDC.cpp`); (4) a manual
+  `ESP_LOGI("M5GFX", ...)` call placed directly in `main.cpp` itself (not a
+  vendored file, ruling out vendored-code timing/ordering) with `(2)`+`(3)`
+  active; (5) `(4)` plus `esp_log_set_vprintf()` explicitly pointed at a
+  function that writes to `Serial` -- the actual documented ESP-IDF API for
+  redirecting log output. Root cause not found; would require reading
+  `esp_log`'s own implementation, not just its headers. Meanwhile, Arduino's
+  own `log_i()`/`log_e()` macros (`esp32-hal-log.h`, used in framework files
+  like `esp32-hal-i2c.c`) show up over the same port with no special
+  handling, and functions **header-inlined into `main.cpp.o`** (e.g.
+  `M5Unified::begin()`, defined in `M5Unified.hpp`, not a separately
+  compiled `M5Unified.cpp` translation unit) can be bracketed with plain
+  `::printf()`/`Serial.printf()` and work immediately -- that's what let the
+  `M5.begin()` split above get measured at all. **Any further narrowing of
+  vendored-library timing must use this header-inlined bracketing
+  technique, not `ESP_LOG*` calls or new prints added to a vendored `.cpp`
+  file** -- those are confirmed dead on this build. Confirmed live,
+  2026-09-05.
+
 ---
 
 ## Design constraints for this project
@@ -312,9 +386,22 @@ Grove PORT.A (HY2.0-4P): `G4`, `G5`, power direction via PM1 `BOOST5V_EN_PP`.
 - Layout is designed host-side in `tools/preview.py`, which renders the exact
   400x600 palette-constrained image. **Iterate there first.** A layout change
   is milliseconds on the laptop and 30 seconds on the device.
-- Target battery life: roughly a month per charge. Rough arithmetic: ~20s awake
-  at ~150mA average = ~0.85mAh per cycle, 48 cycles/day ≈ 41mAh, plus ~2.2mAh/day
-  sleeping ≈ 43mAh/day against 1250mAh. Treat as ballpark, measure for real.
+- Target battery life: roughly a month per charge -- **this estimate is now
+  known wrong, not just unmeasured.** It assumed ~20s awake per cycle
+  (arithmetic below); measured real awake time (2026-09-05, both
+  `m5stack-papercolor` and `m5stack-papercolor-test`, `millis()`-bracketed
+  and confirmed live) is **~78s/cycle** (~50s in `M5.begin()` alone, ~10.5s
+  Wi-Fi + fetch, ~17s render + panel refresh) -- roughly 4x the assumed
+  figure. Do **not** just recalculate by swapping 78s in for 20s below: the
+  mA figures (~150mA average awake, 92.53uA standby) were never measured
+  either (see "Current state" / "Not yet exercised"), and awake current
+  likely doesn't scale linearly across such different phases (a ~50s mostly
+  memory/I2C-bound `M5.begin()` call, Wi-Fi TX, and an actual panel refresh
+  probably don't draw the same). The whole budget needs re-deriving from a
+  real current measurement across an actual cycle, not from arithmetic on a
+  corrected time. Original (now-superseded) arithmetic, kept for reference:
+  ~20s awake at ~150mA average = ~0.85mAh per cycle, 48 cycles/day ≈ 41mAh,
+  plus ~2.2mAh/day sleeping ≈ 43mAh/day against 1250mAh.
 
 ---
 
@@ -379,7 +466,7 @@ document in PSRAM and use a filter — don't parse the whole body on the stack.
 
 ```bash
 pio run                       # build
-pio run -t upload             # flash (hold side reset to enter download mode)
+pio run -t upload             # flash (see button note below -- usually not needed)
 pio device monitor -b 115200  # serial log
 python tools/preview.py       # regenerate the layout preview PNG
 ```
@@ -387,12 +474,23 @@ python tools/preview.py       # regenerate the layout preview PNG
 You (Claude) can and should run these directly. Read the compiler output and
 the serial log yourself rather than asking the user to paste them.
 
-- Uploading requires a physical power-button press on the board first --
-  `pio run -t upload` cannot reach a bootloader that isn't listening. If
-  upload or the post-upload serial connect fails, **stop and ask the user to
-  press the button** rather than retrying; retrying blind against a board
-  that isn't in bootloader mode wastes time and can mask a real problem.
-  Confirmed necessary during the canvas-render session, 2026-09-04.
+- Uploading does **not** require a physical power-button press in the common
+  case. `pio run -t upload --upload-port COMx` succeeded repeatedly (10+
+  times, no button touched) as long as the board was actually powered and
+  running -- either awake mid-cycle, or sitting in `TIER1_TEST`'s command
+  loop, which never sleeps: esptool's own RTS-pin reset was enough to enter
+  the bootloader every time. The button **is** needed when the PM1 has
+  actually cut power between wake cycles (mid-sleep) -- there the port
+  doesn't exist at all, and upload fails with a distinct error
+  (`Could not open COMx, the port is busy or doesn't exist` /
+  `FileNotFoundError`, not an esptool bootloader-sync failure). Check
+  whether the port enumerates at all before assuming a button press is
+  needed; if the board is genuinely mid-sleep, either wait for the next
+  RX8130 wake or ask for the button -- don't retry blindly either way, and
+  don't assume every upload failure means "needs the button" without
+  checking which failure mode it actually is. Originally (2026-09-04)
+  documented as always required; corrected 2026-09-05 after 10+ successful
+  button-free uploads during the boot-delay investigation.
 
 ---
 
