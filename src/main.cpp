@@ -782,7 +782,7 @@ static void tier1HandleRender(const String& json) {
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, json);
   if (err) {
-    Serial.printf("ERR json %s\n", err.c_str());
+    Serial.printf("#ERR json %s\n", err.c_str());
     return;
   }
 
@@ -791,7 +791,7 @@ static void tier1HandleRender(const String& json) {
 
   M5Canvas canvas(&M5.Display);
   if (!tier1RenderToCanvas(canvas, s)) {
-    Serial.println("ERR canvas alloc failed");
+    Serial.println("#ERR canvas alloc failed");
     return;
   }
 
@@ -816,9 +816,12 @@ static void tier1HandleRender(const String& json) {
     // as an explicit error rather than leaving hil.py to either hang
     // waiting for a FB-END that isn't coming, or worse, silently accept a
     // truncated dump as if BYTES= had matched. hil.py's Device checks for
-    // an ERR-prefixed line during the transfer phase too, not just before
-    // ---FB-BEGIN---, specifically to catch this.
-    Serial.println("ERR dump write failed");
+    // a "#ERR"-prefixed line during the transfer phase too, not just before
+    // ---FB-BEGIN---, specifically to catch this. The '#' is not in the
+    // base64 alphabet, so it can never collide with a line of legitimate
+    // payload (unlike a plain "ERR" prefix -- base64's alphabet includes
+    // E, R -- see the matching note in hil.py).
+    Serial.println("#ERR dump write failed");
   }
 
   canvas.deleteSprite();
@@ -883,7 +886,7 @@ void setup() {
     } else if (line.startsWith("RENDER ")) {
       tier1HandleRender(line.substring(7));
     } else {
-      Serial.printf("ERR unknown command: %s\n", line.c_str());
+      Serial.printf("#ERR unknown command: %s\n", line.c_str());
     }
   }
 }

@@ -43,7 +43,43 @@ USB_PID = 0x1001
 # begin(unsigned long baud), which never reads its own baud argument. Kept
 # only because pyserial's constructor requires some value.
 BAUD = 115200
-SERIAL_TIMEOUT_S = 10  # default --timeout: see Device's two-phase read model below.
+# default --timeout: see Device's two-phase read model below. Real,
+# host-measured transfer time for a ~400x600 dump is ~10.2s (CLAUDE.md,
+# 2026-09-08 investigation) -- a genuine ~16KB/s USB_SERIAL_JTAG ceiling,
+# confirmed invariant across CHUNK_BYTES, not a bug this script can fix. 10s
+# sat right on top of that honest number, so a marginally slower run would
+# read as a failure. 30s is a deliberate margin against that real transfer
+# time, not a workaround for a stall -- if a render exceeds this, that's a
+# genuine regression worth investigating, not noise to tune away.
+SERIAL_TIMEOUT_S = 30
+
+# pyserial's Serial class (serialutil.py's SerialBase(io.RawIOBase)) never
+# overrides readline() and implements no peek(), so the stdlib's generic
+# io.RawIOBase.readline() fallback is what actually runs -- and that reads
+# exactly one byte per call to self.read(1). On Windows, serialwin32.py's
+# read(size=1) turns each of those into its own blocking overlapped
+# ReadFile() syscall. For a ~400x600 dump (~2100 base64 lines, ~162KB) that
+# is on the order of 160,000 individual syscalls -- slow enough that the
+# device's tier1WriteAll() retry loop (src/main.cpp), which has no way to
+# tell "genuinely hung" apart from "host draining too slowly to keep up",
+# can stall past even this script's own per-line timeout with no error
+# line ever printed. _LineReader below reads in RX_BULK_READ-sized bulk
+# chunks via Serial.read(n) and splits lines in Python instead, cutting the
+# syscall count from ~1/byte to a handful for the whole dump. Confirmed by
+# reading serialutil.py and serialwin32.py, 2026-09-08.
+RX_BULK_READ = 65536
+
+# serialwin32.py's Serial.open() hardcodes a 4096-byte Windows driver-level
+# receive buffer (`# Setup a 4k buffer` / win32.SetupComm(handle, 4096,
+# 4096)) unless the app raises it afterward via set_buffer_size(). 4096 is
+# smaller than a single device-side 16KB tier1PrintBase64() write chunk, so
+# without this the OS-level buffer -- not RX_BULK_READ reads -- would still
+# be the bottleneck: the driver stops accepting more from the device (USB
+# CDC flow control) the instant it fills, regardless of how fast this
+# script asks for data afterward. Sized comfortably above one device-side
+# chunk. Windows-only API (serialwin32.Serial only) -- guarded with
+# hasattr() so this stays a no-op on other platforms' pyserial backends.
+RX_DRIVER_BUFFER = 131072
 
 SCREEN_W = 400
 SCREEN_H = 600
@@ -71,6 +107,14 @@ PALETTE_RGB = _load_palette()
 
 FB_BEGIN = "---FB-BEGIN---"
 FB_END = "---FB-END---"
+
+# '#' is not in the base64 alphabet (A-Z, a-z, 0-9, +, /), so a line of
+# legitimate base64 payload can never start with it -- unlike the "ERR"
+# prefix this used to be, which collided with valid base64 (e.g. a payload
+# line beginning "ERRxyz...=" is perfectly valid base64 and was previously
+# misdiagnosed as "device reported an error mid-transfer"). Must match
+# src/main.cpp's tier1HandleRender()/setup() error prefixes exactly.
+ERR_PREFIX = "#ERR"
 
 
 class DeviceError(RuntimeError):
@@ -140,6 +184,51 @@ def find_port(explicit_port=None):
     sys.exit(1)
 
 
+class _LineReader:
+    """Splits '\\n'-terminated lines out of a pyserial port using bulk
+    `ser.read(n)` calls into a local buffer, instead of relying on
+    pyserial's own readline() -- see the RX_BULK_READ comment above for why
+    that matters. Multiple lines delivered in one underlying burst are
+    served from the buffer with no further I/O at all.
+    """
+
+    def __init__(self, ser, chunk_size=RX_BULK_READ):
+        self.ser = ser
+        self.chunk_size = chunk_size
+        self._buf = bytearray()
+
+    def readline(self, deadline=None, timeout=None):
+        """Returns the next line as bytes (no trailing '\\r\\n'), or None on
+        timeout. Exactly one of:
+        - `deadline`: a single absolute time.monotonic() value shared
+          across however many underlying reads it takes to find a line --
+          used when waiting for a response to *start*.
+        - `timeout`: a fresh window in seconds, restarted on every
+          underlying read this call has to make -- used when a multi-line
+          transfer is already underway, so a slow-but-steady transfer isn't
+          capped by a shared deadline (only a real gap counts as a stall).
+        """
+        while True:
+            nl = self._buf.find(b"\n")
+            if nl != -1:
+                line = bytes(self._buf[:nl])
+                del self._buf[:nl + 1]
+                return line[:-1] if line[-1:] == b"\r" else line
+
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                self.ser.timeout = remaining
+            else:
+                self.ser.timeout = timeout
+
+            chunk = self.ser.read(self.chunk_size)
+            if not chunk:
+                return None
+            self._buf.extend(chunk)
+
+
 class Device:
     """Line-oriented command/response protocol over the test firmware's serial port.
 
@@ -165,7 +254,14 @@ class Device:
     def __init__(self, port, timeout=SERIAL_TIMEOUT_S):
         self.timeout = timeout
         self.last_dump_ms = None
+        self.last_transfer_wall_s = None
         self.ser = serial.Serial(port, BAUD, timeout=self.timeout)
+        # See the RX_DRIVER_BUFFER comment: Windows-only (serialwin32.Serial),
+        # hence the hasattr guard rather than a platform check -- a no-op
+        # everywhere else, where the backend's own buffering differs.
+        if hasattr(self.ser, "set_buffer_size"):
+            self.ser.set_buffer_size(RX_DRIVER_BUFFER)
+        self._lines = _LineReader(self.ser)
         # Native USB CDC on this board does not reset the MCU when the host
         # opens the port (unlike a UART-bridge chip toggling DTR), so we may
         # be connecting long after the board's one-time "TIER1-READY" boot
@@ -179,27 +275,22 @@ class Device:
     def _readline(self, deadline):
         """Reads one line against a shared absolute `deadline` (a
         time.monotonic() value) -- used for the "waiting to start" phase."""
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
+        line = self._lines.readline(deadline=deadline)
+        if line is None:
             raise DeviceError(f"timed out waiting for device response ({self.timeout}s)")
-        self.ser.timeout = remaining
-        raw = self.ser.readline()
-        if not raw:
-            raise DeviceError(f"timed out waiting for device response ({self.timeout}s)")
-        return raw.decode("ascii", errors="replace").rstrip("\r\n")
+        return line.decode("ascii", errors="replace")
 
     def _readline_chunked(self):
         """Reads one line with its own fresh `self.timeout`-second window --
         used for the "waiting to continue" phase of an already-started
         multi-line transfer, so total transfer time isn't capped."""
-        self.ser.timeout = self.timeout
-        raw = self.ser.readline()
-        if not raw:
+        line = self._lines.readline(timeout=self.timeout)
+        if line is None:
             raise DeviceError(
                 f"timed out waiting for the next line mid-transfer ({self.timeout}s "
                 "since the last one)"
             )
-        return raw.decode("ascii", errors="replace").rstrip("\r\n")
+        return line.decode("ascii", errors="replace")
 
     def _send_line(self, s):
         self.ser.write((s + "\n").encode("ascii"))
@@ -238,14 +329,10 @@ class Device:
             self._send_line("PING")
             attempt_deadline = min(deadline, time.monotonic() + retry_every)
             while True:
-                remaining = attempt_deadline - time.monotonic()
-                if remaining <= 0:
+                raw = self._lines.readline(deadline=attempt_deadline)
+                if raw is None:
                     break
-                self.ser.timeout = remaining
-                raw = self.ser.readline()
-                if not raw:
-                    break
-                line = raw.decode("ascii", errors="replace").rstrip("\r\n")
+                line = raw.decode("ascii", errors="replace")
                 if line == "PONG":
                     return
                 # Ignore stray boot/debug lines and keep reading this attempt out.
@@ -264,20 +351,29 @@ class Device:
         """Sends a RENDER command for `snapshot` (a dict) and returns the
         decoded (w, h, depth, raw_bytes) framebuffer dump.
 
-        Also sets self.last_dump_ms from the firmware's own DUMP_MS=<ms>
-        line (see tier1HandleRender() in src/main.cpp), printed right after
-        ---FB-END--- -- the time the device itself spent base64-encoding
-        and writing the dump to Serial, isolated from JSON parsing/drawing
-        on the device side and from PNG decoding on this side. None if the
-        line doesn't show up (e.g. an older firmware build); that's not an
-        error, just missing bonus instrumentation.
+        Also sets:
+        - self.last_transfer_wall_s: real host-observed wall-clock time from
+          when RENDER was sent to when ---FB-END--- was actually read off
+          the wire (measured in _read_framebuffer(), before base64
+          decoding). This is the honest transfer measurement -- use this,
+          not last_dump_ms, to judge whether a real transfer is fast.
+        - self.last_dump_ms, from the firmware's own DUMP_MS=<ms> line (see
+          tier1HandleRender() in src/main.cpp). This is device-side
+          Serial.write() *enqueue* time only, not a transfer measurement:
+          HWCDC's write() queues bytes into a ring buffer that the ISR
+          drains onto the wire asynchronously, so returning from
+          Serial.write() does not mean the bytes have reached the host (see
+          the tools/hil.py investigation notes in CLAUDE.md, 2026-09-08).
+          None if the line doesn't show up (e.g. an older firmware build);
+          that's not an error, just missing bonus instrumentation.
         """
         payload = json.dumps(snapshot, separators=(",", ":"))
         if "\n" in payload:
             raise ValueError("snapshot JSON must not contain embedded newlines")
-        deadline = time.monotonic() + self.timeout
+        send_time = time.monotonic()
+        deadline = send_time + self.timeout
         self._send_line("RENDER " + payload)
-        result = self._read_framebuffer(deadline)
+        result = self._read_framebuffer(deadline, send_time)
         self.last_dump_ms = self._read_dump_ms()
         return result
 
@@ -286,15 +382,10 @@ class Device:
         informational, so this uses a short fixed timeout rather than
         self.timeout -- a device not printing it (older firmware) shouldn't
         make every render() wait out the full configured timeout."""
-        old_timeout = self.ser.timeout
-        self.ser.timeout = min(self.timeout, 1.0)
-        try:
-            raw = self.ser.readline()
-        finally:
-            self.ser.timeout = old_timeout
-        if not raw:
+        raw = self._lines.readline(timeout=min(self.timeout, 1.0))
+        if raw is None:
             return None
-        line = raw.decode("ascii", errors="replace").rstrip("\r\n")
+        line = raw.decode("ascii", errors="replace")
         if not line.startswith("DUMP_MS="):
             return None
         try:
@@ -302,14 +393,14 @@ class Device:
         except ValueError:
             return None
 
-    def _read_framebuffer(self, deadline):
+    def _read_framebuffer(self, deadline, send_time):
         # Phase 1: waiting for the response to start. Bounded by the single
         # absolute `deadline` computed when the command was sent -- a device
         # that never begins responding (hung, crashed, wrong firmware) still
         # fails within self.timeout seconds.
         while True:
             line = self._readline(deadline)
-            if line.startswith("ERR"):
+            if line.startswith(ERR_PREFIX):
                 raise DeviceError(f"device reported an error: {line}")
             if line == FB_BEGIN:
                 break
@@ -337,13 +428,23 @@ class Device:
         for _ in range(max_lines):
             line = self._readline_chunked()
             if line == FB_END:
+                # Measured here, not after render() returns -- this is the
+                # real transfer completing, before the (host-CPU-bound,
+                # transfer-irrelevant) base64 decode below.
+                self.last_transfer_wall_s = time.monotonic() - send_time
                 break
-            if line.startswith("ERR"):
+            if line.startswith(ERR_PREFIX):
                 # Firmware can abort mid-transfer instead of finishing with
                 # FB_END -- e.g. tier1WriteAll() giving up on a stuck write
                 # (see its comment in src/main.cpp). Must be treated as fatal,
                 # not appended as base64 payload, or a truncated dump could
                 # silently decode into a wrong-but-plausible-looking image.
+                # Checking against ERR_PREFIX ("#ERR"), not a plain "ERR"
+                # prefix, matters here specifically: this branch runs against
+                # lines that are otherwise expected to be base64 payload, and
+                # "ERR" alone is a valid base64 prefix (E, R are both in the
+                # alphabet) -- a real payload line starting with those three
+                # letters would otherwise be misdiagnosed as a device error.
                 raise DeviceError(f"device reported an error mid-transfer: {line}")
             b64_chunks.append(line)
         else:
@@ -450,12 +551,26 @@ def cmd_render(args):
 
 
 def _print_timing(dev, host_elapsed_s):
-    """Prints round-trip and (if the firmware reported it) device-side dump
-    timing, so before/after comparisons across firmware changes don't
-    require separately instrumenting each run by hand."""
+    """Prints the real transfer time plus (if the firmware reported it) the
+    device's own enqueue-time figure, so before/after comparisons across
+    firmware changes don't require separately instrumenting each run by
+    hand. See the caveat below DUMP_MS before trusting it as a transfer
+    number -- it isn't one."""
+    if dev.last_transfer_wall_s is not None:
+        print(
+            f"transfer time:    {dev.last_transfer_wall_s * 1000:.0f} ms  "
+            "(host wall-clock, RENDER sent -> ---FB-END--- read off the wire -- "
+            "the real transfer number)"
+        )
     if dev.last_dump_ms is not None:
-        print(f"device dump time: {dev.last_dump_ms} ms  (encode + Serial.write, on-device)")
-    print(f"host round-trip:  {host_elapsed_s * 1000:.0f} ms  (RENDER sent -> framebuffer fully decoded)")
+        print(
+            f"device DUMP_MS:   {dev.last_dump_ms} ms  "
+            "(Serial.write() ENQUEUE time only, on-device -- HWCDC's ring buffer "
+            "drains to the wire asynchronously, so this is NOT how long the "
+            "transfer actually took; compare against transfer time above, don't "
+            "use this alone)"
+        )
+    print(f"host round-trip:  {host_elapsed_s * 1000:.0f} ms  (RENDER sent -> framebuffer fully decoded, incl. base64 decode)")
 
 
 def images_equal(a, b):

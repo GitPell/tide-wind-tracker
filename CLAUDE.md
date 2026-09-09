@@ -375,6 +375,46 @@ Grove PORT.A (HY2.0-4P): `G4`, `G5`, power direction via PM1 `BOOST5V_EN_PP`.
   file** -- those are confirmed dead on this build. Confirmed live,
   2026-09-05.
 
+- `tools/hil.py`'s framebuffer reads used to rely on pyserial's inherited
+  `readline()`, which does one blocking syscall per byte on Windows, and
+  the Windows driver-level RX buffer defaults to 4096 bytes unless raised.
+  Both are now fixed: `_LineReader` does 64KB bulk `Serial.read(n)` reads
+  and splits lines in Python instead of relying on `readline()`, and
+  `Device.__init__` raises the driver buffer to 128KB via
+  `set_buffer_size()`. Don't reintroduce a bare `self.ser.readline()` call
+  anywhere in this file -- route all reads through the shared `_LineReader`
+  instance. Re-checkable by reading `serialutil.py` / `serialwin32.py`
+  (pyserial), 2026-09-08.
+
+- Real, host-measured transfer time (RENDER sent -> `---FB-END---` read
+  off the wire, `tools/hil.py`) for a ~400x600 dump (~162KB of base64) is
+  **~10.2s, about 16KB/s**. **Never cite `DUMP_MS` as a transfer or
+  throughput figure -- it measures device-side ring-buffer enqueue only.**
+  The device's own `DUMP_MS=` figure (~157ms) only ever measures
+  device-side `Serial.write()` *enqueue* time into the 32KB HWCDC TX ring
+  buffer, not real transfer time: with the small (~78-byte) per-line writes
+  in place before 2026-09-05, that enqueue always returned near-instantly
+  regardless of actual USB throughput, since a tiny write almost never had
+  to wait on ring-buffer space. Treating that figure as a throughput number
+  was wrong.
+  This ~16KB/s rate is **invariant across `CHUNK_BYTES` of 4KB, 8KB, 16KB,
+  and 32KB** -- all four measured within 20ms of each other, 2026-09-08 --
+  which rules out the "chunk exceeds free ring-buffer space, so
+  `HWCDC::write()`'s internal `delay(1)` retry loop dominates" hypothesis
+  (a 4KB chunk, which should almost never need to wait on a 32KB ring
+  buffer, was exactly as slow as a 32KB one). The 2026-09-05 chunking
+  change is still worth keeping -- it fixed a real, different problem
+  (thousands of tiny `Serial.write()` calls serializing against per-call
+  mutex/connection-state overhead) -- it just isn't the lever that
+  controls this ceiling.
+  Suspected but unproven: a throughput ceiling in the ESP32-S3's native
+  `USB_SERIAL_JTAG` peripheral itself. Not worth chasing further for this
+  project -- any fix would be inside vendored ESP-IDF code. If transfer
+  time ever becomes the binding constraint, the cheaper levers are dumping
+  raw 4bpp instead of base64 (~162KB -> ~120KB) or an RLE pass, given how
+  much of the dashboard is uniform background. Confirmed live on real
+  hardware, 2026-09-08.
+
 ---
 
 ## Design constraints for this project
