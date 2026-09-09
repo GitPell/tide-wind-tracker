@@ -123,6 +123,16 @@ class DeviceError(RuntimeError):
     pass
 
 
+# Distinct exit codes so a script driving `hil.py test` in a loop can tell
+# "the render regressed" (EXIT_MISMATCH -- act on it, it's a real finding)
+# apart from "couldn't even complete the comparison" (EXIT_DEVICE_ERROR --
+# board unplugged, wrong firmware, protocol hiccup, missing golden file;
+# retry or fix the environment, not the render). Both used to be a bare
+# sys.exit(1), indistinguishable without parsing stderr text.
+EXIT_MISMATCH = 1
+EXIT_DEVICE_ERROR = 2
+
+
 # --- Temporary instrumentation for the "transfer time tracks the timeout
 # exactly" investigation (2026-09-10, serial-timing branch) -- not meant to
 # ship. Enable with HIL_DEBUG_READS=1. Logs every underlying
@@ -200,7 +210,7 @@ def find_port(explicit_port=None):
             file=sys.stderr,
         )
     _print_all_ports(ports)
-    sys.exit(1)
+    sys.exit(EXIT_DEVICE_ERROR)
 
 
 class _LineReader:
@@ -309,7 +319,18 @@ class Device:
         self.timeout = timeout
         self.last_dump_ms = None
         self.last_transfer_wall_s = None
-        self.ser = serial.Serial(port, BAUD, timeout=self.timeout)
+        try:
+            self.ser = serial.Serial(port, BAUD, timeout=self.timeout)
+        except serial.SerialException as e:
+            # Wrapped as DeviceError, not left to propagate raw: a bad/busy/
+            # missing port (e.g. the board unplugged, or --port pointing at
+            # nothing) is exactly the "couldn't reach the device" case every
+            # cmd_* function's `except DeviceError` -> EXIT_DEVICE_ERROR path
+            # exists for. Left unwrapped, this used to escape as an uncaught
+            # SerialException -- a raw traceback, and Python's default exit
+            # code 1 for an uncaught exception, indistinguishable from
+            # EXIT_MISMATCH. Confirmed live, 2026-09-10.
+            raise DeviceError(str(e)) from e
         # See the RX_DRIVER_BUFFER comment: Windows-only (serialwin32.Serial),
         # hence the hasattr guard rather than a platform check -- a no-op
         # everywhere else, where the backend's own buffering differs.
@@ -557,36 +578,48 @@ def load_fixture(path):
 
 def cmd_ping(args):
     port = find_port(args.port)
-    dev = Device(port, timeout=args.timeout)
+    # Device(...) itself -- not just the calls after it -- must be inside
+    # this try: it's what actually opens the serial port, so a bad/busy/
+    # missing port raises DeviceError right here. Left outside the try (as
+    # this used to be, in all four cmd_* functions), that exception skips
+    # the `except DeviceError` handler entirely and escapes as an uncaught
+    # traceback. `dev = None` first so `finally` can tell whether there's
+    # anything to close. Confirmed live, 2026-09-10.
+    dev = None
     try:
+        dev = Device(port, timeout=args.timeout)
         dev.ping(timeout=args.connect_timeout)
         print("PONG")
     except DeviceError as e:
         print(f"error: {e}", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(EXIT_DEVICE_ERROR)
     finally:
-        dev.close()
+        if dev:
+            dev.close()
     return 0
 
 
 def cmd_quit(args):
     port = find_port(args.port)
-    dev = Device(port, timeout=args.timeout)
+    dev = None  # see cmd_ping's comment on why Device(...) must be inside the try
     try:
+        dev = Device(port, timeout=args.timeout)
         dev.quit()
         print("BYE")
     except DeviceError as e:
         print(f"error: {e}", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(EXIT_DEVICE_ERROR)
     finally:
-        dev.close()
+        if dev:
+            dev.close()
     return 0
 
 
 def cmd_render(args):
     port = find_port(args.port)
-    dev = Device(port, timeout=args.timeout)
+    dev = None  # see cmd_ping's comment on why Device(...) must be inside the try
     try:
+        dev = Device(port, timeout=args.timeout)
         dev.ping(timeout=args.connect_timeout)
         snapshot = load_fixture(args.fixture)
         t0 = time.monotonic()
@@ -602,11 +635,18 @@ def cmd_render(args):
         img.save(args.out)
         print(f"wrote {args.out}")
         _print_timing(dev, elapsed)
-    except DeviceError as e:
+    except (DeviceError, FileNotFoundError, json.JSONDecodeError) as e:
+        # The latter two are load_fixture() failing on a bad --fixture path
+        # or malformed JSON -- a setup problem, same bucket as
+        # EXIT_DEVICE_ERROR (couldn't reach a verdict), definitely not
+        # EXIT_MISMATCH (compared and found a real difference). Left
+        # uncaught, either used to escape as a raw traceback with Python's
+        # default exit code 1, indistinguishable from a genuine mismatch.
         print(f"error: {e}", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(EXIT_DEVICE_ERROR)
     finally:
-        dev.close()
+        if dev:
+            dev.close()
     return 0
 
 
@@ -652,8 +692,9 @@ def make_diff_image(expected, actual):
 
 def cmd_test(args):
     port = find_port(args.port)
-    dev = Device(port, timeout=args.timeout)
+    dev = None  # see cmd_ping's comment on why Device(...) must be inside the try
     try:
+        dev = Device(port, timeout=args.timeout)
         dev.ping(timeout=args.connect_timeout)
         snapshot = load_fixture(args.fixture)
         t0 = time.monotonic()
@@ -661,16 +702,22 @@ def cmd_test(args):
         elapsed = time.monotonic() - t0
         actual = decode_palette4(raw, w, h)
         _print_timing(dev, elapsed)
-    except DeviceError as e:
+    except (DeviceError, FileNotFoundError, json.JSONDecodeError) as e:
+        # See cmd_render's matching except clause for why these two extra
+        # exception types belong in the same bucket as DeviceError here.
         print(f"error: {e}", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(EXIT_DEVICE_ERROR)
     finally:
-        dev.close()
+        if dev:
+            dev.close()
 
     golden_path = Path(args.golden)
     if not golden_path.exists():
+        # Couldn't even reach a verdict -- not the same failure as a
+        # confirmed pixel mismatch below, so it must not share that exit
+        # code (see EXIT_MISMATCH/EXIT_DEVICE_ERROR).
         print(f"error: golden image not found: {golden_path}", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(EXIT_DEVICE_ERROR)
     expected = Image.open(golden_path)
 
     if images_equal(expected, actual):
@@ -691,7 +738,7 @@ def cmd_test(args):
     print(f"  expected: {expected_path}", file=sys.stderr)
     print(f"  actual:   {actual_path}", file=sys.stderr)
     print(f"  diff:     {diff_path}", file=sys.stderr)
-    sys.exit(1)
+    sys.exit(EXIT_MISMATCH)
 
 
 def main():

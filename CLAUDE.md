@@ -561,6 +561,78 @@ the serial log yourself rather than asking the user to paste them.
 
 ---
 
+## Test harness (Tier 1 / hil.py)
+
+```bash
+python tools/hil.py ping                                            # confirm the board is alive
+python tools/hil.py render test/fixtures/example.json --out actual.png
+python tools/hil.py test test/fixtures/example.json --golden test/golden/example.png
+```
+
+Requires a board flashed with the `m5stack-papercolor-test` PlatformIO env
+(`pio run -e m5stack-papercolor-test -t upload --upload-port COMx`) -- no
+Wi-Fi, no NOAA/Open-Meteo fetch, no PM1 sleep, no panel refresh. `render`
+sends a Snapshot fixture over USB serial, gets the rendered canvas buffer
+back as base64, and decodes it to a PNG. `test` does the same and diffs the
+result against a golden image byte-for-byte (`images_equal()` in
+`tools/hil.py` -- exact match, not a perceptual/threshold diff).
+
+A real round trip (`render` or `test`, RENDER sent -> framebuffer fully
+decoded) is **~230ms** -- see the transfer-time entry above. That's what
+makes this worth running on every render-affecting change, not just
+occasionally: it's closer to a fast unit test than a hardware step.
+
+- **Exit codes are distinct, not overloaded.** `EXIT_MISMATCH` (1) means
+  `test` compared a real render against the golden and found a difference
+  -- a genuine finding, act on it. `EXIT_DEVICE_ERROR` (2) means the
+  comparison never happened at all -- board unplugged, wrong firmware,
+  protocol error, missing/malformed fixture, or missing golden file -- so
+  it needs the opposite response (fix the environment, not the render). A
+  script driving this in a loop can safely treat 2 as "retry or alert
+  separately" and 1 as "this is real." (Both used to be a bare
+  `sys.exit(1)`, indistinguishable without parsing stderr text -- and a
+  connection failure during `Device()` construction, plus a bad `--fixture`
+  path, both used to bypass the error handling entirely and escape as raw
+  uncaught tracebacks with Python's default exit code 1. Fixed 2026-09-10:
+  `Device.__init__` now wraps `serial.SerialException` as `DeviceError`,
+  `cmd_render`/`cmd_test` now catch fixture-loading failures too, and
+  `Device(...)` construction itself moved inside each command's `try` --
+  it was outside it, in all four commands, so its own DeviceError could
+  never reach the `except` beneath it.) On mismatch, `test` writes
+  `expected.png`, `actual.png`, and `diff.png` (the golden with mismatched
+  pixels highlighted in magenta) into `--out-dir` (default: cwd) before
+  exiting 1, so the failure is inspectable without re-running anything.
+  Exit 0 with `MATCH: ...` on stdout means the render is pixel-identical
+  to the golden.
+
+- **Fixtures are generated, not hand-authored.** `test/fixtures/example.json`
+  comes from `tools/make_fixture.py`, which derives both `tide[]` (hourly
+  samples) and `events[]` (the model's true extrema) from one shared
+  analytic tide curve -- the same one `tools/preview.py`'s `synthetic()`
+  uses -- instead of two independently-typed arrays. A hand-edited
+  `events[]` previously drifted out of sync with `tide[]` (two of four
+  events landed 45-90 minutes from where the sampled curve actually
+  peaks/troughs, one with a magnitude the curve never reached), and it
+  took an actual render to notice -- nothing about the JSON itself looked
+  wrong on inspection. Regenerate with `python tools/make_fixture.py --out
+  test/fixtures/example.json`; don't hand-edit `tide[]`/`events[]` directly.
+
+- **Goldens live in `test/golden/` and are committed.** `actual.png`,
+  `expected.png`, and `diff.png` are gitignored -- they're `test` output,
+  regenerated every run, not source of truth. Only the golden itself is
+  checked in.
+
+- **Regenerating a golden is a deliberate, separate act.** It asserts
+  "this new output is correct," a judgment call a diff can't make for
+  you -- never overwrite `test/golden/*.png` as a side effect of the
+  change it's meant to validate, and never fold that update into the same
+  commit. Regenerate it (`python tools/hil.py render ... --out
+  test/golden/example.png`), look at it, and commit it on its own with a
+  reason (e.g. "update golden for the wind-chip layout change" -- not
+  just "update golden").
+
+---
+
 ## Repo layout
 
 ```
