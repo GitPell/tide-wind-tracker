@@ -9,3 +9,7 @@ monitor.log
 .vscode/
 
 __pycache__/
+
+actual.png
+expected.png
+diff.png
