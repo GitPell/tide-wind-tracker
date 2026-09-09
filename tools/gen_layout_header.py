@@ -94,7 +94,7 @@ namespace layout {{
 }}  // namespace layout
 """
 
-    OUT_HEADER.write_text(header)
+    OUT_HEADER.write_text(header, newline="\n")
     print(f"generated {OUT_HEADER.relative_to(ROOT).as_posix()} "
           f"from {LAYOUT_JSON.relative_to(ROOT).as_posix()} and "
           f"{PALETTE_JSON.relative_to(ROOT).as_posix()}")
