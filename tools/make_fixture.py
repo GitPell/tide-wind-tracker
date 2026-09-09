@@ -42,10 +42,16 @@ from pathlib import Path
 
 # Same two-constituent model as tools/preview.py's synthetic(): mean level +
 # M2-like semidiurnal (~12.42h) + K1-like diurnal-inequality (~24.84h,
-# phase-shifted) term.
+# phase-shifted) term. Kept as the defaults for --tide-mean/--tide-semi-amp/
+# --tide-diurnal-amp (periods and phase are not exposed -- no fixture so far
+# has needed to vary the *timing* of the constituents, only their scale).
 MEAN_FT = 3.0
 SEMI_AMP_FT, SEMI_PERIOD_H = 1.9, 12.42
 DIURNAL_AMP_FT, DIURNAL_PERIOD_H, DIURNAL_PHASE = 0.6, 24.84, 1.1
+
+# Same shape tools/preview.py's synthetic() uses for wind_forecast: base +
+# two sine terms. Kept as defaults for --forecast-base/-amp1/-amp2.
+FORECAST_BASE, FORECAST_AMP1, FORECAST_AMP2 = 9.0, 8.0, 2.0
 
 # Fixed so regenerating with default args is reproducible -- matches
 # test/fixtures/example.json's original start time.
@@ -54,17 +60,22 @@ DEFAULT_HOURS = 25
 DEFAULT_NOW_OFFSET_H = 12
 
 
-def height(hours_since_start):
-    """The tide model, in feet, as a function of hours since `start`. The
-    single source of truth for both tide[] (hourly samples of this) and
-    events[] (this function's own true extrema) -- see module docstring."""
-    h = hours_since_start
-    return (MEAN_FT
-            + SEMI_AMP_FT * math.sin(2 * math.pi * h / SEMI_PERIOD_H)
-            + DIURNAL_AMP_FT * math.sin(2 * math.pi * h / DIURNAL_PERIOD_H + DIURNAL_PHASE))
+def make_height_fn(mean=MEAN_FT, semi_amp=SEMI_AMP_FT, diurnal_amp=DIURNAL_AMP_FT):
+    """Returns a height(hours_since_start) -> ft function for the tide
+    model -- a closure over the given amplitudes/mean rather than module
+    globals, so a fixture can shrink the range (e.g. calm.json) without
+    disturbing the default model everything else uses. The single source of
+    truth for both tide[] (hourly samples of this) and events[] (this
+    function's own true extrema) -- see module docstring."""
+    def height(hours_since_start):
+        h = hours_since_start
+        return (mean
+                + semi_amp * math.sin(2 * math.pi * h / SEMI_PERIOD_H)
+                + diurnal_amp * math.sin(2 * math.pi * h / DIURNAL_PERIOD_H + DIURNAL_PHASE))
+    return height
 
 
-def find_events(total_hours, grid_minutes=1):
+def find_events(height, total_hours, grid_minutes=1):
     """Finds height()'s true local extrema by scanning a fine grid and
     comparing each point against its immediate neighbors. Returns a list of
     (hours_since_start, ft, "H"|"L"), sorted by time.
@@ -74,6 +85,13 @@ def find_events(total_hours, grid_minutes=1):
     resolution -- a one-time generator run, not a per-frame render, so the
     extra resolution costs nothing and narrows event times to within a
     minute of the model's real turning point instead of within six.
+
+    A perfectly flat model (semi_amp = diurnal_amp = 0) finds zero events
+    here, not tiny-but-real ones -- h_cur is never *strictly* greater/less
+    than both neighbors when everything is equal. Deliberate: calm.json
+    uses a small but nonzero amplitude instead of exactly zero, so it stays
+    a distinct case from no_events.json rather than accidentally becoming
+    a second copy of it.
     """
     n = int(total_hours * 60 / grid_minutes) + 1
     fine = [(i * grid_minutes / 60.0, height(i * grid_minutes / 60.0)) for i in range(n)]
@@ -104,21 +122,33 @@ def parse_start(s):
 
 
 def build_snapshot(start_epoch, hours, now_offset_h, wind_now, gust_now, wind_dir,
-                    indoor_c, indoor_rh, battery, ok):
+                    indoor_c, indoor_rh, battery, ok,
+                    tide_mean=MEAN_FT, tide_semi_amp=SEMI_AMP_FT, tide_diurnal_amp=DIURNAL_AMP_FT,
+                    no_events=False,
+                    forecast_base=FORECAST_BASE, forecast_amp1=FORECAST_AMP1, forecast_amp2=FORECAST_AMP2):
     if hours + 1 > 26:
         raise ValueError(f"hours={hours} would produce {hours + 1} tide[] points, exceeds Snapshot::tide[26]")
+
+    height = make_height_fn(tide_mean, tide_semi_amp, tide_diurnal_amp)
 
     tide = [
         {"t": start_epoch + i * 3600, "ft": round(height(i), 2)}
         for i in range(hours + 1)
     ]
 
-    events = [
-        {"t": start_epoch + round(h * 3600), "ft": round(v, 2), "kind": k}
-        for h, v, k in find_events(hours)
-    ]
-    if len(events) > 10:
-        raise ValueError(f"{len(events)} events found, exceeds Snapshot::events[10] -- shorten --hours")
+    # no_events=True (no_events.json) skips the model's real extrema
+    # entirely rather than truncating/filtering the result -- events[] must
+    # come out genuinely empty, not "empty because everything got filtered
+    # out", to exercise drawNowStrip()'s/drawTide()'s no-next-event paths.
+    if no_events:
+        events = []
+    else:
+        events = [
+            {"t": start_epoch + round(h * 3600), "ft": round(v, 2), "kind": k}
+            for h, v, k in find_events(height, hours)
+        ]
+        if len(events) > 10:
+            raise ValueError(f"{len(events)} events found, exceeds Snapshot::events[10] -- shorten --hours")
 
     now_epoch = start_epoch + now_offset_h * 3600
     tide_now = round(height(now_offset_h), 2)
@@ -132,7 +162,8 @@ def build_snapshot(start_epoch, hours, now_offset_h, wind_now, gust_now, wind_di
     # here for a generator to protect against drifting.
     forecast = [
         {"t": now_epoch + i * 3600,
-         "kt": round(9 + 8 * math.sin(2 * math.pi * (i + 4) / 26) + 2 * math.sin(i * 1.7), 1)}
+         "kt": round(forecast_base + forecast_amp1 * math.sin(2 * math.pi * (i + 4) / 26)
+                     + forecast_amp2 * math.sin(i * 1.7), 1)}
         for i in range(24)
     ]
 
@@ -168,6 +199,9 @@ def format_snapshot(snapshot):
         comma = "," if i < len(keys) - 1 else ""
         value = snapshot[key]
         if key in _ARRAY_FIELDS:
+            if not value:
+                lines.append(f'  "{key}": []{comma}')
+                continue
             lines.append(f'  "{key}": [')
             for j, entry in enumerate(value):
                 entry_comma = "," if j < len(value) - 1 else ""
@@ -197,6 +231,24 @@ def main():
     parser.add_argument("--battery", type=int, default=78)
     parser.add_argument("--not-ok", action="store_false", dest="ok",
                          help="Set ok=false (simulates a fetch failure) instead of the default true")
+    parser.add_argument("--tide-mean", type=float, default=MEAN_FT, dest="tide_mean",
+                         help=f"Tide model mean level, ft (default: {MEAN_FT})")
+    parser.add_argument("--tide-semi-amp", type=float, default=SEMI_AMP_FT, dest="tide_semi_amp",
+                         help=f"Semidiurnal (~12.42h) constituent amplitude, ft -- shrink for a near-flat "
+                              f"curve, but keep nonzero: exactly 0 (with --tide-diurnal-amp 0 too) makes "
+                              f"find_events() find nothing, same as --no-events, not a distinct case "
+                              f"(default: {SEMI_AMP_FT})")
+    parser.add_argument("--tide-diurnal-amp", type=float, default=DIURNAL_AMP_FT, dest="tide_diurnal_amp",
+                         help=f"Diurnal-inequality (~24.84h) constituent amplitude, ft (default: {DIURNAL_AMP_FT})")
+    parser.add_argument("--no-events", action="store_true", dest="no_events",
+                         help="Emit events: [] regardless of the tide model -- for testing the no-next-event path")
+    parser.add_argument("--forecast-base", type=float, default=FORECAST_BASE, dest="forecast_base",
+                         help=f"Wind forecast base level, kt (default: {FORECAST_BASE})")
+    parser.add_argument("--forecast-amp1", type=float, default=FORECAST_AMP1, dest="forecast_amp1",
+                         help=f"Wind forecast primary swing amplitude, kt (default: {FORECAST_AMP1})")
+    parser.add_argument("--forecast-amp2", type=float, default=FORECAST_AMP2, dest="forecast_amp2",
+                         help=f"Wind forecast secondary (higher-frequency) swing amplitude, kt "
+                              f"(default: {FORECAST_AMP2})")
     parser.add_argument("--out", help="Output path (default: stdout)")
     args = parser.parse_args()
 
@@ -205,6 +257,9 @@ def main():
         start_epoch, args.hours, args.now_offset,
         args.wind_now, args.gust_now, args.wind_dir,
         args.indoor_c, args.indoor_rh, args.battery, args.ok,
+        tide_mean=args.tide_mean, tide_semi_amp=args.tide_semi_amp, tide_diurnal_amp=args.tide_diurnal_amp,
+        no_events=args.no_events,
+        forecast_base=args.forecast_base, forecast_amp1=args.forecast_amp1, forecast_amp2=args.forecast_amp2,
     )
 
     text = format_snapshot(snapshot)
