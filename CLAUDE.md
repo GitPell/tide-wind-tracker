@@ -567,6 +567,7 @@ the serial log yourself rather than asking the user to paste them.
 python tools/hil.py ping                                            # confirm the board is alive
 python tools/hil.py render test/fixtures/example.json --out actual.png
 python tools/hil.py test test/fixtures/example.json --golden test/golden/example.png
+python tools/hil.py test --all                                      # every fixture, one session
 ```
 
 Requires a board flashed with the `m5stack-papercolor-test` PlatformIO env
@@ -604,6 +605,22 @@ occasionally: it's closer to a fast unit test than a hardware step.
   exiting 1, so the failure is inspectable without re-running anything.
   Exit 0 with `MATCH: ...` on stdout means the render is pixel-identical
   to the golden.
+
+- **`test --all`** walks `test/fixtures/*.json`, pairs each with
+  `test/golden/<name>.png`, and runs them in one serial session instead of
+  reconnecting per fixture -- ~230ms per fixture, ~1.2s for the current
+  five. Prints a PASS/FAIL line per fixture plus a summary count. Exit
+  codes: 0 only if every fixture matches, 1 if any fixture fails, 2 if a
+  `DeviceError` aborts the run outright (remaining fixtures then go
+  untested, unlike a single fixture's failure). **A missing golden's exit
+  code differs by mode:** exit 1 in `--all` (that fixture fails, the run
+  continues) vs. exit 2 in single-fixture `test` (bucketed with
+  `EXIT_DEVICE_ERROR` above). Deliberate, not an oversight -- `--all` wants
+  "exit 0" to mean "everything that could be checked passed," so a missing
+  golden has to read the same as a real mismatch there, not the same as a
+  dead connection. Mismatches write to
+  `<out-dir>/<fixture>/{expected,actual,diff}.png` -- one subdirectory per
+  fixture, so multiple failures in a run don't collide.
 
 - **Fixtures are generated, not hand-authored.** `test/fixtures/example.json`
   comes from `tools/make_fixture.py`, which derives both `tide[]` (hourly

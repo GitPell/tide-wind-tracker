@@ -94,6 +94,14 @@ DEPTH = 4  # bits/pixel, palette_4bit
 # palette change -- see palette.json for why array order is load-bearing.
 _PALETTE_JSON_PATH = Path(__file__).resolve().parent.parent / "palette.json"
 
+# `test` --all's fixture/golden pairing. Script-relative (like
+# _PALETTE_JSON_PATH above), not CWD-relative like the single-fixture
+# `fixture`/`--golden` arguments, since --all has no positional argument to
+# anchor a relative path off of and shouldn't silently find nothing just
+# because it was run from a different directory.
+_FIXTURES_DIR = Path(__file__).resolve().parent.parent / "test" / "fixtures"
+_GOLDEN_DIR = Path(__file__).resolve().parent.parent / "test" / "golden"
+
 
 def _hex_to_rgb(h):
     h = h.lstrip("#")
@@ -690,7 +698,116 @@ def make_diff_image(expected, actual):
     return Image.composite(highlight, e, mask)
 
 
+def _test_one_in_session(dev, fixture_path, golden_path, out_dir):
+    """Renders `fixture_path` on the already-connected `dev` and compares
+    against `golden_path`. Used by --all, where one Device is shared across
+    every fixture instead of reconnecting (and re-eating the board's
+    up-to-~50s USB reset/reboot) per fixture.
+
+    Returns True on match, False for anything else that isn't a real match
+    -- a pixel mismatch, a missing golden, or a bad/unreadable fixture file
+    -- none of which should stop the rest of an --all run; they're just
+    that one fixture's result. A missing golden is reported as a failure
+    here, not skipped, same as a real mismatch.
+
+    The one thing that's allowed to propagate uncaught is DeviceError, from
+    dev.render() -- a real connection/protocol failure. Continuing to the
+    next fixture over a session that just failed like that isn't safe (the
+    same problem will likely just repeat), so the caller must stop the
+    whole --all run instead of only failing this one fixture.
+    """
+    try:
+        snapshot = load_fixture(fixture_path)
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        print(f"FAIL (bad fixture): {fixture_path}: {e}", file=sys.stderr)
+        return False
+
+    t0 = time.monotonic()
+    w, h, depth, raw = dev.render(snapshot)  # DeviceError intentionally propagates
+    elapsed = time.monotonic() - t0
+    actual = decode_palette4(raw, w, h)
+    _print_timing(dev, elapsed)
+
+    golden_path = Path(golden_path)
+    if not golden_path.exists():
+        print(f"FAIL (missing golden): {fixture_path} -> {golden_path}", file=sys.stderr)
+        return False
+
+    expected = Image.open(golden_path)
+    if images_equal(expected, actual):
+        print(f"PASS: {Path(fixture_path).name}")
+        return True
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    expected_path = out_dir / "expected.png"
+    actual_path = out_dir / "actual.png"
+    diff_path = out_dir / "diff.png"
+    expected.convert("RGB").save(expected_path)
+    actual.save(actual_path)
+    make_diff_image(expected, actual).save(diff_path)
+
+    print(f"FAIL (mismatch): {Path(fixture_path).name}", file=sys.stderr)
+    print(f"  expected: {expected_path}", file=sys.stderr)
+    print(f"  actual:   {actual_path}", file=sys.stderr)
+    print(f"  diff:     {diff_path}", file=sys.stderr)
+    return False
+
+
+def _cmd_test_all(args):
+    fixtures = sorted(_FIXTURES_DIR.glob("*.json"))
+    if not fixtures:
+        print(f"error: no fixtures found in {_FIXTURES_DIR}", file=sys.stderr)
+        sys.exit(EXIT_DEVICE_ERROR)
+
+    out_root = Path(args.out_dir) if args.out_dir else Path(".")
+
+    port = find_port(args.port)
+    dev = None  # see cmd_ping's comment on why Device(...) must be inside the try
+    results = []
+    try:
+        dev = Device(port, timeout=args.timeout)
+        dev.ping(timeout=args.connect_timeout)
+        for fixture_path in fixtures:
+            name = fixture_path.stem
+            golden_path = _GOLDEN_DIR / f"{name}.png"
+            ok = _test_one_in_session(dev, fixture_path, golden_path, out_root / name)
+            results.append((name, ok))
+    except DeviceError as e:
+        print(f"error: {e}", file=sys.stderr)
+        print(f"aborting --all after {len(results)}/{len(fixtures)} fixtures -- "
+              "the shared session is likely no longer usable", file=sys.stderr)
+        sys.exit(EXIT_DEVICE_ERROR)
+    finally:
+        if dev:
+            dev.close()
+
+    passed = sum(1 for _, ok in results if ok)
+    total = len(results)
+    print(f"\n{passed}/{total} fixtures passed")
+    for name, ok in results:
+        print(f"  {'PASS' if ok else 'FAIL'}  {name}")
+
+    sys.exit(0 if passed == total else EXIT_MISMATCH)
+
+
 def cmd_test(args):
+    if args.all:
+        if args.fixture or args.golden:
+            print(
+                "error: --all doesn't take a fixture positional or --golden -- it pairs every "
+                f"{_FIXTURES_DIR}/*.json with {_GOLDEN_DIR}/<name>.png itself",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        _cmd_test_all(args)
+        return
+
+    if not args.fixture or not args.golden:
+        print("error: 'fixture' and --golden are required (or pass --all to test every fixture)",
+              file=sys.stderr)
+        sys.exit(2)
+
     port = find_port(args.port)
     dev = None  # see cmd_ping's comment on why Device(...) must be inside the try
     try:
@@ -771,9 +888,20 @@ def main():
     p_render.set_defaults(func=cmd_render)
 
     p_test = sub.add_parser("test", help="Render a fixture and compare it against a golden PNG")
-    p_test.add_argument("fixture", help="Path to a Snapshot JSON fixture")
-    p_test.add_argument("--golden", required=True, help="Path to the golden PNG to compare against")
-    p_test.add_argument("--out-dir", default=None, help="Directory to write expected/actual/diff PNGs on mismatch (default: cwd)")
+    p_test.add_argument("fixture", nargs="?", help="Path to a Snapshot JSON fixture (omit with --all)")
+    p_test.add_argument("--golden", help="Path to the golden PNG to compare against (omit with --all)")
+    p_test.add_argument(
+        "--all", action="store_true",
+        help=f"Test every {_FIXTURES_DIR}/*.json against {_GOLDEN_DIR}/<name>.png in one shared "
+             "serial session instead of reconnecting per fixture. Exit 0 only if every fixture "
+             "matches, 1 if any mismatch (including a missing golden), 2 on a device error.",
+    )
+    p_test.add_argument(
+        "--out-dir", default=None,
+        help="Directory to write expected/actual/diff PNGs on mismatch -- with --all, each failing "
+             "fixture gets its own <out-dir>/<name>/ subdirectory so failures don't overwrite each "
+             "other (default: cwd)",
+    )
     p_test.set_defaults(func=cmd_test)
 
     args = parser.parse_args()
