@@ -22,6 +22,7 @@ Requires: see tools/requirements.txt (pip install -r tools/requirements.txt)
 import argparse
 import base64
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -43,15 +44,16 @@ USB_PID = 0x1001
 # begin(unsigned long baud), which never reads its own baud argument. Kept
 # only because pyserial's constructor requires some value.
 BAUD = 115200
-# default --timeout: see Device's two-phase read model below. Real,
-# host-measured transfer time for a ~400x600 dump is ~10.2s (CLAUDE.md,
-# 2026-09-08 investigation) -- a genuine ~16KB/s USB_SERIAL_JTAG ceiling,
-# confirmed invariant across CHUNK_BYTES, not a bug this script can fix. 10s
-# sat right on top of that honest number, so a marginally slower run would
-# read as a failure. 30s is a deliberate margin against that real transfer
-# time, not a workaround for a stall -- if a render exceeds this, that's a
-# genuine regression worth investigating, not noise to tune away.
-SERIAL_TIMEOUT_S = 30
+# default --timeout: see Device's two-phase read model below. The
+# 2026-09-08 measurement that justified raising this to 30s (~10.2s
+# "transfer time") was itself a host-side bug -- see CLAUDE.md's
+# 2026-09-10 entry -- not a real number, so it couldn't justify a real
+# margin. Real, host-measured transfer time for a ~400x600 dump is
+# ~220-235ms. 10s is ~40x that, and 2x `tier1WriteAll()`'s own 5000ms
+# give-up threshold (src/main.cpp) with room left over for its `#ERR` line
+# to actually arrive after it gives up, rather than this script timing out
+# first and reporting a generic timeout instead of the device's real error.
+SERIAL_TIMEOUT_S = 10
 
 # pyserial's Serial class (serialutil.py's SerialBase(io.RawIOBase)) never
 # overrides readline() and implements no peek(), so the stdlib's generic
@@ -119,6 +121,23 @@ ERR_PREFIX = "#ERR"
 
 class DeviceError(RuntimeError):
     pass
+
+
+# --- Temporary instrumentation for the "transfer time tracks the timeout
+# exactly" investigation (2026-09-10, serial-timing branch) -- not meant to
+# ship. Enable with HIL_DEBUG_READS=1. Logs every underlying
+# self.ser.read(n) call _LineReader makes (requested size, the ser.timeout
+# it was given, how long the call actually took, and how many bytes came
+# back), plus a few named markers (RENDER sent, FB_BEGIN/FB_END seen), all
+# on one shared clock -- so the exact call that eats the missing time shows
+# up directly instead of being inferred from aggregate numbers.
+_DEBUG_READS = bool(os.environ.get("HIL_DEBUG_READS"))
+_DEBUG_T0 = time.monotonic()
+
+
+def _dbg(msg):
+    if _DEBUG_READS:
+        print(f"[{time.monotonic() - _DEBUG_T0:8.3f}s] {msg}", file=sys.stderr)
 
 
 def _format_vid_pid(p):
@@ -190,6 +209,12 @@ class _LineReader:
     pyserial's own readline() -- see the RX_BULK_READ comment above for why
     that matters. Multiple lines delivered in one underlying burst are
     served from the buffer with no further I/O at all.
+
+    Each underlying read asks for exactly what's currently available
+    (`ser.in_waiting`, capped at `chunk_size`), not a fixed `chunk_size`
+    every time -- see the comment in readline() for why a fixed request
+    size turns any undersized final read into a multi-second stall on this
+    port's Windows COMMTIMEOUTS configuration, confirmed live 2026-09-10.
     """
 
     def __init__(self, ser, chunk_size=RX_BULK_READ):
@@ -223,7 +248,36 @@ class _LineReader:
             else:
                 self.ser.timeout = timeout
 
-            chunk = self.ser.read(self.chunk_size)
+            # Request only as much as is actually sitting in the driver's
+            # receive buffer right now (or, if nothing is, exactly 1 byte)
+            # -- never a fixed self.chunk_size regardless of what's really
+            # coming. Confirmed live, 2026-09-10 (see CLAUDE.md): on
+            # Windows, this port's COMMTIMEOUTS configuration
+            # (ReadIntervalTimeout=0, ReadTotalTimeoutMultiplier=0,
+            # ReadTotalTimeoutConstant=timeout*1000) makes ReadFile block
+            # for the *entire* configured timeout waiting for the full
+            # requested count, not just until some data arrives -- it does
+            # NOT return early with partial data. Asking for a fixed 64KB
+            # on every call turned the final, necessarily-undersized read
+            # of almost every transfer into a multi-second stall for data
+            # that had, in the case that exposed this, already arrived
+            # within the first ~200ms. Requesting in_waiting bytes lets a
+            # call that already has data return immediately; requesting 1
+            # byte when nothing is buffered yet means that call returns
+            # the instant *any* new data shows up instead of waiting for a
+            # specific count that may never come -- so this never spins on
+            # a zero-byte read (self.ser.read(1) genuinely blocks, up to
+            # `remaining`/`timeout`, until at least one byte exists or a
+            # real stall is confirmed by hitting that timeout).
+            request = min(self.chunk_size, self.ser.in_waiting or 1)
+            wait_mode = f"deadline(remaining={remaining:.3f}s)" if deadline is not None else f"timeout={timeout:.3f}s"
+            t_before = time.monotonic()
+            chunk = self.ser.read(request)
+            call_elapsed = time.monotonic() - t_before
+            if _DEBUG_READS:
+                preview = chunk[:32].decode("ascii", errors="replace")
+                _dbg(f"ser.read({request}) {wait_mode} ser.timeout={self.ser.timeout:.3f}s "
+                     f"-> {len(chunk)}B in {call_elapsed*1000:8.1f}ms  head={preview!r}")
             if not chunk:
                 return None
             self._buf.extend(chunk)
@@ -372,9 +426,12 @@ class Device:
             raise ValueError("snapshot JSON must not contain embedded newlines")
         send_time = time.monotonic()
         deadline = send_time + self.timeout
+        _dbg(f"RENDER sent ({len(payload)}B payload)")
         self._send_line("RENDER " + payload)
         result = self._read_framebuffer(deadline, send_time)
+        _dbg("_read_framebuffer() returned, reading DUMP_MS...")
         self.last_dump_ms = self._read_dump_ms()
+        _dbg(f"DUMP_MS read -> {self.last_dump_ms}")
         return result
 
     def _read_dump_ms(self):
@@ -403,6 +460,7 @@ class Device:
             if line.startswith(ERR_PREFIX):
                 raise DeviceError(f"device reported an error: {line}")
             if line == FB_BEGIN:
+                _dbg("FB_BEGIN seen")
                 break
 
         # Phase 2: the transfer itself, once it has demonstrably started.
@@ -416,6 +474,7 @@ class Device:
             )
         except (KeyError, ValueError) as e:
             raise DeviceError(f"malformed framebuffer header: {header!r}") from e
+        _dbg(f"header parsed: W={w} H={h} DEPTH={depth} BYTES={nbytes}")
 
         # Per-line timeouts alone don't bound the *total* number of lines --
         # a firmware bug that never emits ---FB-END--- would otherwise loop
@@ -432,6 +491,7 @@ class Device:
                 # real transfer completing, before the (host-CPU-bound,
                 # transfer-irrelevant) base64 decode below.
                 self.last_transfer_wall_s = time.monotonic() - send_time
+                _dbg(f"FB_END seen, last_transfer_wall_s={self.last_transfer_wall_s:.3f}s")
                 break
             if line.startswith(ERR_PREFIX):
                 # Firmware can abort mid-transfer instead of finishing with

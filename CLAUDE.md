@@ -378,42 +378,69 @@ Grove PORT.A (HY2.0-4P): `G4`, `G5`, power direction via PM1 `BOOST5V_EN_PP`.
 - `tools/hil.py`'s framebuffer reads used to rely on pyserial's inherited
   `readline()`, which does one blocking syscall per byte on Windows, and
   the Windows driver-level RX buffer defaults to 4096 bytes unless raised.
-  Both are now fixed: `_LineReader` does 64KB bulk `Serial.read(n)` reads
-  and splits lines in Python instead of relying on `readline()`, and
-  `Device.__init__` raises the driver buffer to 128KB via
-  `set_buffer_size()`. Don't reintroduce a bare `self.ser.readline()` call
-  anywhere in this file -- route all reads through the shared `_LineReader`
-  instance. Re-checkable by reading `serialutil.py` / `serialwin32.py`
-  (pyserial), 2026-09-08.
+  Both are now fixed: `_LineReader` reads via bulk `Serial.read(n)` calls
+  (capped at 64KB, but sized to what's actually waiting -- see the
+  2026-09-10 entry below, a *fixed* 64KB request turned out to be its own
+  bug) instead of relying on `readline()`, and `Device.__init__` raises the
+  driver buffer to 128KB via `set_buffer_size()`. Don't reintroduce a bare
+  `self.ser.readline()` call anywhere in this file -- route all reads
+  through the shared `_LineReader` instance. Re-checkable by reading
+  `serialutil.py` / `serialwin32.py` (pyserial), 2026-09-08.
 
-- Real, host-measured transfer time (RENDER sent -> `---FB-END---` read
-  off the wire, `tools/hil.py`) for a ~400x600 dump (~162KB of base64) is
-  **~10.2s, about 16KB/s**. **Never cite `DUMP_MS` as a transfer or
-  throughput figure -- it measures device-side ring-buffer enqueue only.**
-  The device's own `DUMP_MS=` figure (~157ms) only ever measures
-  device-side `Serial.write()` *enqueue* time into the 32KB HWCDC TX ring
-  buffer, not real transfer time: with the small (~78-byte) per-line writes
-  in place before 2026-09-05, that enqueue always returned near-instantly
-  regardless of actual USB throughput, since a tiny write almost never had
-  to wait on ring-buffer space. Treating that figure as a throughput number
-  was wrong.
-  This ~16KB/s rate is **invariant across `CHUNK_BYTES` of 4KB, 8KB, 16KB,
-  and 32KB** -- all four measured within 20ms of each other, 2026-09-08 --
-  which rules out the "chunk exceeds free ring-buffer space, so
-  `HWCDC::write()`'s internal `delay(1)` retry loop dominates" hypothesis
-  (a 4KB chunk, which should almost never need to wait on a 32KB ring
-  buffer, was exactly as slow as a 32KB one). The 2026-09-05 chunking
-  change is still worth keeping -- it fixed a real, different problem
-  (thousands of tiny `Serial.write()` calls serializing against per-call
-  mutex/connection-state overhead) -- it just isn't the lever that
-  controls this ceiling.
-  Suspected but unproven: a throughput ceiling in the ESP32-S3's native
-  `USB_SERIAL_JTAG` peripheral itself. Not worth chasing further for this
-  project -- any fix would be inside vendored ESP-IDF code. If transfer
-  time ever becomes the binding constraint, the cheaper levers are dumping
-  raw 4bpp instead of base64 (~162KB -> ~120KB) or an RLE pass, given how
-  much of the dashboard is uniform background. Confirmed live on real
-  hardware, 2026-09-08.
+- The 2026-09-08 entry above this one originally read "~10.2s, about
+  16KB/s" for transfer time, called that rate invariant across
+  `CHUNK_BYTES` of 4KB/8KB/16KB/32KB, and blamed a `USB_SERIAL_JTAG`
+  hardware ceiling. **All of that was wrong** -- not a hardware limit, a
+  host-side bug in `tools/hil.py` itself, confirmed live 2026-09-10 and
+  corrected here rather than appended, so a future skim doesn't pick up
+  the wrong number.
+  Real transfer time (RENDER sent -> `---FB-END---` read off the wire) for
+  the same ~400x600 dump (~162KB of base64) is **~220-235ms, roughly
+  700KB/s** -- consistent with the device's own `DUMP_MS` enqueue figure
+  (~160ms) for the first time, because it was always in the right
+  ballpark; `tools/hil.py` was the thing lying.
+  Mechanism: `_LineReader` requested a *fixed* `RX_BULK_READ` (64KB) on
+  every underlying `Serial.read(n)` call, regardless of how much of the
+  transfer actually remained. On Windows, this port's COMMTIMEOUTS
+  configuration (`ReadIntervalTimeout=0`, `ReadTotalTimeoutMultiplier=0`,
+  `ReadTotalTimeoutConstant=timeout*1000`) makes `ReadFile` block for the
+  *entire* configured timeout waiting for the full requested count -- it
+  does not return early just because some data arrived. The transfer's
+  final read is almost never an exact multiple of 64KB, so its last
+  underlying `Serial.read(65536)` call would ask for far more than the
+  ~31KB actually left, and sit for the whole `--timeout` before returning
+  data that (confirmed by per-read timestamp logging) had already arrived
+  within the first ~200ms. Raising `--timeout` from 10s to 30s to 60s and
+  watching "transfer time" track it to within ~0.2s at each step (10230ms,
+  30212ms, 60203ms) is what exposed this -- a real measurement doesn't
+  move when you change an unrelated timeout.
+  This is also why the `CHUNK_BYTES` 4KB/8KB/16KB/32KB trial looked
+  invariant: `RX_BULK_READ` (the host's request size) was constant across
+  every trial regardless of `CHUNK_BYTES` (the device's write size), so
+  all four were measuring the exact same host-side artifact, not device
+  throughput. Whether `CHUNK_BYTES` affects real transfer speed is
+  therefore back to genuinely unproven -- that experiment never actually
+  tested it.
+  Fix: `_LineReader` now requests `min(chunk_size, ser.in_waiting or 1)`
+  instead of a fixed `chunk_size` -- a call that already has data
+  available returns immediately with exactly that; a call with nothing
+  buffered yet asks for exactly 1 byte, so it returns the instant *any*
+  new data shows up instead of waiting on a specific count that may never
+  come, and doesn't spin (`ser.read(1)` genuinely blocks until a byte
+  exists or the timeout confirms a real stall). Confirmed live,
+  2026-09-10.
+  The 2026-09-05 chunking change (batching `Serial.write()` into 16KB
+  device-side calls) is unaffected by any of this and still worth keeping
+  -- it fixed a real, different problem (thousands of tiny `Serial.write()`
+  calls serializing against per-call mutex/connection-state overhead), on
+  the device side; today's bug and fix are entirely host-side.
+  `--timeout` (`SERIAL_TIMEOUT_S`) is back down from 30s to **10s**,
+  justified by the real number this time: ~40x margin over the ~230ms
+  real transfer, and 2x the device's own `tier1WriteAll()` 5000ms
+  give-up threshold (`src/main.cpp`) with room for that function's `#ERR`
+  line to actually arrive after it gives up, rather than the host timing
+  out first and reporting a generic timeout instead of the device's real
+  error.
 
 ---
 
