@@ -332,7 +332,7 @@ static void drawHeader(M5Canvas& gfx, const Snapshot& s) {
   gfx.setCursor(DATETIME_X, DATETIME_Y);
   gfx.print(buf);
 
-  snprintf(buf, sizeof buf, "%.0fC %.0f%%  BATT %d%%",
+  snprintf(buf, sizeof buf, "%.0fC %.0f%%  BAT %d%%",
            s.indoorC, s.indoorRh, s.battery);
   using namespace layout::firmware_only::header;
   gfx.setCursor(SCREEN_W - READOUT_RIGHT_OFFSET, READOUT_Y);

@@ -51,7 +51,7 @@
 
   "_comment_firmware_only": "Elements only src/main.cpp draws. Not consumed by preview.py.",
   "firmware_only": {
-    "header": { "readout_right_offset": 150, "readout_y": 20 },
+    "header": { "readout_right_offset": 155, "readout_y": 20 },
     "_comment_wind": "reading_dy/kt_dy are a first-pass estimate for FreeSansBold18pt7b (42px line height) + FreeSansBold9pt7b (22px), bottom-aligned by line-height difference (42-22=20). Not verified on hardware -- check on-device and adjust.",
     "wind": { "reading_x": 152, "reading_dy": 20, "kt_gap": 8, "kt_dy": 40 }
   },

@@ -87,7 +87,7 @@ namespace layout {
   }
   namespace firmware_only {
     namespace header {
-      constexpr int READOUT_RIGHT_OFFSET = 150;
+      constexpr int READOUT_RIGHT_OFFSET = 155;
       constexpr int READOUT_Y = 20;
     }
     namespace wind {
