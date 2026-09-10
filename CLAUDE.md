@@ -48,13 +48,24 @@ coastal location. Wakes on a timer, fetches data over Wi-Fi, redraws, sleeps.
   is ~78s/cycle against an assumed ~20s.
 
 **Next steps:**
-1. Measure real standby/active current and run a multi-day battery soak
-   test -- more urgent now that measured awake time (~78s/cycle) is ~4x the
-   assumed figure the existing battery estimate was built on.
-2. Narrow the ~33s unexplained remainder inside `M5Unified`'s `_begin(cfg)`
-   (RTC/IMU/mic/speaker already ruled out -- see "Verified corrections").
-   Use header-inlined `millis()` bracketing, not `ESP_LOG*` or new prints in
-   a vendored `.cpp` file -- confirmed dead on this build, see below.
+1. Build a host-side SDL renderer to replace `tools/preview.py`'s PIL-based
+   preview -- PIL is a static-image proxy for what M5GFX itself draws; an
+   SDL build linking the real M5GFX/LovyanGFX drawing code would run the
+   actual render path during layout iteration instead of a parallel
+   reimplementation of it.
+2. Re-derive the battery budget from an actual current measurement, not
+   arithmetic on a corrected time -- see "Design constraints" and the
+   `M5.begin()` entry in "Verified corrections". Measured awake time
+   (~78s/cycle) is ~4x the original ~20s assumption, but the mA figures
+   (~150mA average awake, 92.53uA standby) were never measured either, and
+   awake current likely doesn't scale linearly across such different
+   phases (a mostly memory/I2C-bound `M5.begin()`, Wi-Fi TX, and an actual
+   panel refresh probably don't draw the same).
+3. Wi-Fi `NO_AP_FOUND` still unresolved. `connectWifi()` (`src/main.cpp`)
+   only distinguishes connected vs. not, via `WiFi.status() != WL_CONNECTED`
+   in a timeout loop -- it doesn't log or branch on *which* status came
+   back, so a `NO_AP_FOUND` occurrence can't yet be told apart from a wrong
+   password, a timeout, or the AP being out of range.
 
 ---
 
