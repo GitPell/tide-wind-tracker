@@ -983,6 +983,14 @@ void setup() {
   }
   s.battery  = M5.Power.getBatteryLevel();
 
+  // One grep-able line per cycle for battery-life tracking (BATLOG prefix).
+  // vbat_mv is -1 if the PM1 I2C read itself failed, so a bad reading still
+  // shows up as one line rather than a silently missing cycle.
+  uint16_t battMv = 0;
+  bool vbatOk = pm1.readVbat(&battMv) == M5PM1_OK;
+  Serial.printf("BATLOG cycle=%lu level=%d%% vbat_mv=%d\n",
+                (unsigned long)cycle, s.battery, vbatOk ? (int)battMv : -1);
+
   if (connectWifi()) {
     configTzTime(TZ_STRING, "pool.ntp.org", "time.nist.gov");
 
