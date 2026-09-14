@@ -5,13 +5,7 @@ coastal location. Wakes on a timer, fetches data over Wi-Fi, redraws, sleeps.
 
 ---
 
-## Current state (as of 2026-09-05)
-
-**A battery soak test is running (started cycle 289, 2026-09-11). Until told
-otherwise: do not flash, monitor, or otherwise connect to the device -- no
-`pio run -t upload`, no `tools/hil.py`, no `pio device monitor`, no opening
-the serial port. "Run the tests" means host-side compilation only (`pio run`
-without `-t upload`) -- not anything that touches the board.**
+## Current state (as of 2026-09-14)
 
 **Works, confirmed on real hardware:**
 - Build pipeline: `pio run` regenerates `src/layout.h` from `layout.json` and
@@ -52,37 +46,61 @@ without `-t upload`) -- not anything that touches the board.**
   `m5stack-papercolor-test`, ran the suite, flashed `m5stack-papercolor`
   back to resume it; the PM1-RTC-RAM cycle counter is untouched by
   reflashing, so the soak's cycle count continued from where it left off).
+- The battery soak test completed: started cycle 289 on 2026-09-11 at 15:11
+  at 100% battery, ended cycle 334 on 2026-09-14 at 10:08 at 98% -- 45
+  cycles over 66h57m. Two findings:
+  - Battery drain is **month-shaped, not week-shaped** at this rate, so the
+    ~50s `M5.begin()` cost (see "Verified corrections") is not the problem
+    it looked like when only the time budget was known.
+  - The observed interval was **89.3 minutes/cycle against a configured
+    `UPDATE_MINUTES=30`** (`src/config.h`) -- almost exactly 3x. This is an
+    **open bug, not a settled figure** -- cause unknown. Don't compute a
+    days-per-charge number from the 100%->98% drop until it's understood,
+    since it changes the cycles-per-day arithmetic directly (see "Next
+    steps" and "Design constraints").
 
 **Not yet exercised:**
-- Battery life / current draw. The 92.53uA standby figure is a datasheet
-  target derived from reading the reference firmware, not a measurement on
-  this board. Worse than merely unmeasured as of 2026-09-05: the awake side
-  of the budget is now **known wrong** -- see "Design constraints" below and
-  the `M5.begin()` entry in "Verified corrections". Real measured awake time
-  is ~78s/cycle against an assumed ~20s.
-- Actually compiling `src/render.cpp` into an SDL host build -- the toolchain
-  it needs (MSYS2, gcc/g++, SDL2 dev headers, PlatformIO's `native` platform)
-  is still not installed on this machine (confirmed absent again
-  2026-09-13). This is separate from the golden-image check above (which is
-  now done): that only proves `render.cpp` is free of Arduino/M5Unified/
-  network includes and still compiles for the ESP32 target, not that it
-  actually compiles or links against a real SDL backend.
+- Current draw (battery life itself is now soak-tested, see above). The
+  92.53uA standby and ~150mA average-awake figures are still datasheet/
+  arithmetic estimates, not measurements on this board -- see "Design
+  constraints" below and the `M5.begin()` entry in "Verified corrections".
+  Real measured awake time is ~78s/cycle against an original ~20s
+  assumption, but per the soak result above, that gap looks less alarming
+  now that real multi-day drain is known to be month-shaped.
+- The host-side SDL renderer. The render-module extraction it depends on is
+  **done and verified**: `src/render.h`/`src/render.cpp` compile free of
+  Arduino/M5Unified/network includes and produce pixel-identical output
+  (see the bullet above and "Verified corrections"). What remains is
+  installing the toolchain (MSYS2, gcc/g++, SDL2 dev headers, PlatformIO's
+  `native` platform -- still not installed on this machine, confirmed
+  absent again 2026-09-13) and writing a host entry point modeled on
+  M5GFX's `examples/PlatformIO_SDL/`.
 
 **Next steps:**
-1. Build a host-side SDL renderer to replace `tools/preview.py`'s PIL-based
-   preview -- PIL is a static-image proxy for what M5GFX itself draws; an
-   SDL build linking the real M5GFX/LovyanGFX drawing code would run the
-   actual render path during layout iteration instead of a parallel
-   reimplementation of it.
-2. Re-derive the battery budget from an actual current measurement, not
+1. Root-cause the sleep-interval discrepancy found by the soak test: 89.3
+   minutes/cycle observed against `UPDATE_MINUTES=30` (`src/config.h`) --
+   almost exactly 3x. This is a real bug on the production path, not just
+   a measurement question, and it blocks computing a days-per-charge figure
+   from the soak's battery drop (item 3 below) since it changes the
+   cycles-per-day term directly.
+2. Finish the host-side SDL renderer to replace `tools/preview.py`'s
+   PIL-based preview -- PIL is a static-image proxy for what M5GFX itself
+   draws; an SDL build linking the real M5GFX/LovyanGFX drawing code would
+   run the actual render path during layout iteration instead of a
+   parallel reimplementation of it. The render-module extraction is done
+   and verified; what remains is installing the toolchain (MSYS2, gcc/g++,
+   SDL2 dev headers, PlatformIO's `native` platform) and writing a host
+   entry point modeled on M5GFX's `examples/PlatformIO_SDL/`.
+3. Re-derive the battery budget from an actual current measurement, not
    arithmetic on a corrected time -- see "Design constraints" and the
    `M5.begin()` entry in "Verified corrections". Measured awake time
    (~78s/cycle) is ~4x the original ~20s assumption, but the mA figures
    (~150mA average awake, 92.53uA standby) were never measured either, and
    awake current likely doesn't scale linearly across such different
    phases (a mostly memory/I2C-bound `M5.begin()`, Wi-Fi TX, and an actual
-   panel refresh probably don't draw the same).
-3. Wi-Fi `NO_AP_FOUND` still unresolved. `connectWifi()` (`src/main.cpp`)
+   panel refresh probably don't draw the same). Don't combine this with a
+   cycles-per-day figure until item 1 above is resolved.
+4. Wi-Fi `NO_AP_FOUND` still unresolved. `connectWifi()` (`src/main.cpp`)
    only distinguishes connected vs. not, via `WiFi.status() != WL_CONNECTED`
    in a timeout loop -- it doesn't log or branch on *which* status came
    back, so a `NO_AP_FOUND` occurrence can't yet be told apart from a wrong
@@ -547,6 +565,14 @@ Grove PORT.A (HY2.0-4P): `G4`, `G5`, power direction via PM1 `BOOST5V_EN_PP`.
   corrected time. Original (now-superseded) arithmetic, kept for reference:
   ~20s awake at ~150mA average = ~0.85mAh per cycle, 48 cycles/day ≈ 41mAh,
   plus ~2.2mAh/day sleeping ≈ 43mAh/day against 1250mAh.
+  A real multi-day soak (2026-09-11 to 2026-09-14, see "Current state") is
+  at least qualitatively month-shaped, not week-shaped (100%->98% over 45
+  cycles / 66h57m) -- but don't treat that as confirming the "48
+  cycles/day" arithmetic above: the soak's observed cadence was 89.3
+  minutes/cycle against the configured `UPDATE_MINUTES=30`, an unexplained
+  ~3x gap (see "Next steps", now the top item) that changes the
+  cycles-per-day term directly. No days-per-charge number should be
+  computed until that's resolved.
 
 ---
 
