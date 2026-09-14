@@ -44,6 +44,14 @@ without `-t upload`) -- not anything that touches the board.**
   drawing straight to `M5.Display`. Confirmed on real hardware: correct
   visual output, and canvas allocation shifts `ESP.getFreeHeap()` by only 64
   bytes (buffer lives in PSRAM -- see Verified corrections).
+- The `src/render.h`/`src/render.cpp` extraction (2026-09-13, see Verified
+  corrections) is pixel-identical on real hardware: `python tools/hil.py
+  test --all` against all 5 goldens (`calm`, `example`, `high_wind`,
+  `long_station`, `no_events`) is **5/5 PASS, exit 0** -- confirmed
+  2026-09-14, briefly interrupting the battery soak test (flashed
+  `m5stack-papercolor-test`, ran the suite, flashed `m5stack-papercolor`
+  back to resume it; the PM1-RTC-RAM cycle counter is untouched by
+  reflashing, so the soak's cycle count continued from where it left off).
 
 **Not yet exercised:**
 - Battery life / current draw. The 92.53uA standby figure is a datasheet
@@ -52,26 +60,13 @@ without `-t upload`) -- not anything that touches the board.**
   of the budget is now **known wrong** -- see "Design constraints" below and
   the `M5.begin()` entry in "Verified corrections". Real measured awake time
   is ~78s/cycle against an assumed ~20s.
-- Pixel-identical output from the `src/render.h`/`src/render.cpp` extraction
-  (2026-09-13): `Snapshot`, the palette constants, `compass()`,
-  `windColor()`, `initCanvas()`, and the six `draw*()` functions now live in
-  their own header/source pair with no `Arduino.h`/`M5Unified.h`/network
-  includes of their own -- both PlatformIO envs (`pio run`) build clean, and
-  the move was reviewed line-for-line as a pure relocation (the only logic
-  changes: the `radians()`/`constrain()`/`min()`/`max()` macro replacements,
-  which reproduce Arduino's exact `DEG_TO_RAD` constant under a different
-  name -- see "M5GFX transitively includes Arduino.h" below -- and a new
-  `Snapshot::stationLabel` field, added because `drawHeader()` turned out to
-  read `STATION_LABEL` from `config.h`, not a `layout.h` constant; see that
-  field's comment in `render.h`). **Not yet confirmed against real
-  hardware**: `tools/hil.py test --all`'s 5 goldens (`calm`, `example`,
-  `high_wind`, `long_station`, `no_events`) haven't been re-run -- blocked by
-  the battery soak test (see top of this file). Also not yet attempted:
-  actually compiling `render.cpp` into an SDL host build -- the toolchain it
-  needs (MSYS2, gcc/g++, SDL2 dev headers, PlatformIO's `native` platform)
+- Actually compiling `src/render.cpp` into an SDL host build -- the toolchain
+  it needs (MSYS2, gcc/g++, SDL2 dev headers, PlatformIO's `native` platform)
   is still not installed on this machine (confirmed absent again
-  2026-09-13). Re-run the golden diff as the first thing once the soak test
-  ends and the board is available.
+  2026-09-13). This is separate from the golden-image check above (which is
+  now done): that only proves `render.cpp` is free of Arduino/M5Unified/
+  network includes and still compiles for the ESP32 target, not that it
+  actually compiles or links against a real SDL backend.
 
 **Next steps:**
 1. Build a host-side SDL renderer to replace `tools/preview.py`'s PIL-based

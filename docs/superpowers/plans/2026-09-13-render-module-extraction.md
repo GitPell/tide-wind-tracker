@@ -698,13 +698,13 @@ EOF
 
 ## Verification Summary
 
-**Can verify now, this session:**
+**Verified this session (before hardware was available):**
 - `pio run -e m5stack-papercolor` and `pio run -e m5stack-papercolor-test` both succeed after every task (compile-only, no upload — safe under the soak-test freeze).
 - `grep` confirms `render.h`/`render.cpp` contain no `Arduino.h`/`M5Unified.h`/`WiFi*.h`/`HTTPClient.h` includes after Task 2.
-- Manual/`git diff` review confirms Task 1 is a pure code move and Task 2's only semantic changes are the four documented macro replacements.
+- Manual/`git diff` review confirms Task 1 is a pure code move (plus the reviewed `stationLabel` amendment) and Task 2's only semantic changes are the four documented macro replacements (plus the reviewed `kDegToRad` rename).
 
-**Must wait for hardware (battery soak test to end):**
-- `python tools/hil.py test --all` against all 5 committed goldens — the actual proof that output is pixel-identical, not just "compiles and looks the same on inspection."
+**Verified 2026-09-14, once the board became available:**
+- `python tools/hil.py test --all` against all 5 committed goldens — **5/5 PASS, exit 0**. Ran by flashing `m5stack-papercolor-test` over the running battery soak test, running the suite, then flashing `m5stack-papercolor` back to resume the soak (PM1 RTC-RAM cycle counter unaffected by reflashing). This is the actual proof that the render-module extraction is pixel-identical, not just "compiles and looks the same on inspection" — the branch's one open item at handoff time, now closed.
 
-**Must wait for toolchain installation (separate from the soak freeze — `CLAUDE.md`'s SDL "Next steps" item):**
+**Still must wait for toolchain installation (separate from the soak freeze — `CLAUDE.md`'s SDL "Next steps" item):**
 - Actually compiling `render.cpp` as part of an SDL host build. No C or C++ compiler of any kind is currently on this machine's PATH (checked: `g++`, `gcc`, `cl`, `clang++` — none found), so this plan cannot attempt it, only clear the way for it.
