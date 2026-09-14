@@ -60,7 +60,7 @@ CLAUDE.md        MODIFIED (Task 3) — status note on what's verified vs.
 **Interfaces:**
 - Produces (for Task 2 and for `main.cpp`): `struct TidePoint { time_t t; float ft; };`, `struct TideEvent { time_t t; float ft; char kind; };`, `struct WindPoint { time_t t; float kt; };`, `struct Snapshot { ... }` (fields unchanged from current `main.cpp`), `constexpr uint32_t C_BLACK/C_WHITE/C_RED/C_YELLOW/C_BLUE/C_GREEN`, `constexpr int SCREEN_W/SCREEN_H`, `const char* compass(int deg)`, `uint32_t windColor(float kt)`, `bool initCanvas(M5Canvas& canvas)`, `void drawHeader/drawNowStrip/drawTide/drawWind/drawForecast/drawFooter(M5Canvas& gfx, const Snapshot& s)`.
 
-- [ ] **Step 1: Create `src/render.h`**
+- [x] **Step 1: Create `src/render.h`**
 
 ```cpp
 #pragma once
@@ -127,7 +127,7 @@ void drawForecast(M5Canvas& gfx, const Snapshot& s);
 void drawFooter(M5Canvas& gfx, const Snapshot& s);
 ```
 
-- [ ] **Step 2: Create `src/render.cpp`** (bodies copied verbatim from the current `src/main.cpp`; `Arduino.h` kept for now so `radians()`/`constrain()`/`min()`/`max()` still resolve — removed in Task 2)
+- [x] **Step 2: Create `src/render.cpp`** (bodies copied verbatim from the current `src/main.cpp`; `Arduino.h` kept for now so `radians()`/`constrain()`/`min()`/`max()` still resolve — removed in Task 2)
 
 ```cpp
 #include "render.h"
@@ -407,7 +407,7 @@ void drawFooter(M5Canvas& gfx, const Snapshot& s) {
 }
 ```
 
-- [ ] **Step 3: Edit `src/main.cpp`**
+- [x] **Step 3: Edit `src/main.cpp`**
 
 Remove the `#include "layout.h"` line (now pulled in transitively via `render.h`; safe to drop since nothing else in `main.cpp` references `layout::` directly outside the moved code) and add `#include "render.h"` right after it:
 
@@ -424,7 +424,7 @@ Delete these now-duplicated blocks entirely (they moved to `render.h`/`render.cp
 
 Everything else in `main.cpp` — `nextCycleCount()`, `parseLocal()`/`parseIso()`, `readSht40()`, the HTTP/fetch functions, `clearScreenFull()`, `drawAll()`, the whole `TIER1_TEST` block, `connectWifi()`, `sleepUntilNext()`, `setup()`/`loop()` — is unchanged; they already only call into the moved symbols by name, which now resolve via `render.h`.
 
-- [ ] **Step 4: Build both PlatformIO envs**
+- [x] **Step 4: Build both PlatformIO envs**
 
 Run: `pio run -e m5stack-papercolor`
 Expected: `SUCCESS`, no errors or warnings about undefined symbols.
@@ -432,13 +432,13 @@ Expected: `SUCCESS`, no errors or warnings about undefined symbols.
 Run: `pio run -e m5stack-papercolor-test`
 Expected: `SUCCESS`.
 
-- [ ] **Step 5: Confirm the move introduced no logic change**
+- [x] **Step 5: Confirm the move introduced no logic change**
 
 Run: `git diff HEAD -- src/main.cpp` and read it top to bottom — every hunk should be a pure deletion (the code that moved), with no lines inside `main.cpp`'s surviving functions changed.
 
 Then compare each function in `src/render.cpp` against the deleted `main.cpp` version (e.g. `git show HEAD:src/main.cpp | sed -n '318,583p'` alongside the new file) to confirm the bodies are character-for-character identical apart from the temporary `Arduino.h` include and dropping the `static` on `compass()`/`windColor()`/`initCanvas()` (they need external linkage now that they're declared in `render.h` and called from `main.cpp`).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/render.h src/render.cpp src/main.cpp
@@ -466,7 +466,7 @@ EOF
 - Consumes: everything Task 1 put in `render.h` (unchanged).
 - Produces: `render.cpp` with zero Arduino/M5Unified/network includes — the state Task 3 documents as done.
 
-- [ ] **Step 1: Audit every `min()`/`max()`/`constrain()` call site for type mismatches before touching any of them**
+- [x] **Step 1: Audit every `min()`/`max()`/`constrain()` call site for type mismatches before touching any of them**
 
 Arduino's `min()`/`max()`/`constrain()` are untyped macros — they compile regardless of whether the arguments match. `std::min`/`std::max`/the `clampT<T>` template this task introduces all require both arguments to already be the same type. Casting one side to make it compile is exactly the kind of change this refactor must not make (a cast can move a rounding boundary, which can move a pixel) — so this step's job is to confirm, for each site, that both arguments are *already* the same type in the moved code, using the actual declared types, not by inspection alone.
 
@@ -486,7 +486,7 @@ There are 7 sites in `render.cpp` after Task 1 (`drawTide`: 3x `min`/`max` + 1x 
 
 If re-reading `render.cpp` at execution time shows a site whose two arguments are **not** the same type (e.g. a future layout or struct change introduced one), **stop before writing any substitution for that site and report it** — name the file, line, both arguments, and both their types — rather than adding a cast to make `std::min`/`std::max`/`clampT` compile.
 
-- [ ] **Step 2: Replace the include block**
+- [x] **Step 2: Replace the include block**
 
 Before:
 ```cpp
@@ -531,7 +531,7 @@ constexpr T clampT(T amt, T lo, T hi) {
 }  // namespace
 ```
 
-- [ ] **Step 3: Replace the four call sites in `drawTide()`**
+- [x] **Step 3: Replace the four call sites in `drawTide()`**
 
 Before:
 ```cpp
@@ -561,7 +561,7 @@ After:
   int nx = px(clampT(s.now, t0, t1));
 ```
 
-- [ ] **Step 4: Replace the three `radians()` calls in `drawWind()`**
+- [x] **Step 4: Replace the three `radians()` calls in `drawWind()`**
 
 Before:
 ```cpp
@@ -590,7 +590,7 @@ After:
   float barbAngle = toRadians(float(ARROW_BARB_ANGLE_DEG));
 ```
 
-- [ ] **Step 5: Replace the three `max()` calls in `drawForecast()`**
+- [x] **Step 5: Replace the three `max()` calls in `drawForecast()`**
 
 Before:
 ```cpp
@@ -612,12 +612,12 @@ After:
     int h = std::max(BAR_MIN_HEIGHT, int(v / peak * (y1 - y0 - BAR_HEIGHT_MARGIN)));
 ```
 
-- [ ] **Step 6: Confirm no forbidden includes remain**
+- [x] **Step 6: Confirm no forbidden includes remain**
 
 Run: `grep -n -E "Arduino\.h|M5Unified\.h|WiFi(ClientSecure)?\.h|HTTPClient\.h" src/render.h src/render.cpp`
 Expected: no output (exit code 1 from grep).
 
-- [ ] **Step 7: Build both PlatformIO envs**
+- [x] **Step 7: Build both PlatformIO envs**
 
 Run: `pio run -e m5stack-papercolor`
 Expected: `SUCCESS`.
@@ -625,7 +625,7 @@ Expected: `SUCCESS`.
 Run: `pio run -e m5stack-papercolor-test`
 Expected: `SUCCESS`.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/render.cpp
@@ -654,7 +654,7 @@ EOF
 **Interfaces:**
 - Consumes: nothing code-level; this is a documentation-only task.
 
-- [ ] **Step 1: Add a bullet under "Not yet exercised"**
+- [x] **Step 1: Add a bullet under "Not yet exercised"**
 
 Insert this bullet into the "Not yet exercised" list in `CLAUDE.md` (after the existing battery-life bullet):
 
@@ -677,7 +677,7 @@ Insert this bullet into the "Not yet exercised" list in `CLAUDE.md` (after the e
   ends and the board is available.
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add CLAUDE.md

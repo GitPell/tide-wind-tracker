@@ -52,6 +52,26 @@ without `-t upload`) -- not anything that touches the board.**
   of the budget is now **known wrong** -- see "Design constraints" below and
   the `M5.begin()` entry in "Verified corrections". Real measured awake time
   is ~78s/cycle against an assumed ~20s.
+- Pixel-identical output from the `src/render.h`/`src/render.cpp` extraction
+  (2026-09-13): `Snapshot`, the palette constants, `compass()`,
+  `windColor()`, `initCanvas()`, and the six `draw*()` functions now live in
+  their own header/source pair with no `Arduino.h`/`M5Unified.h`/network
+  includes of their own -- both PlatformIO envs (`pio run`) build clean, and
+  the move was reviewed line-for-line as a pure relocation (the only logic
+  changes: the `radians()`/`constrain()`/`min()`/`max()` macro replacements,
+  which reproduce Arduino's exact `DEG_TO_RAD` constant under a different
+  name -- see "M5GFX transitively includes Arduino.h" below -- and a new
+  `Snapshot::stationLabel` field, added because `drawHeader()` turned out to
+  read `STATION_LABEL` from `config.h`, not a `layout.h` constant; see that
+  field's comment in `render.h`). **Not yet confirmed against real
+  hardware**: `tools/hil.py test --all`'s 5 goldens (`calm`, `example`,
+  `high_wind`, `long_station`, `no_events`) haven't been re-run -- blocked by
+  the battery soak test (see top of this file). Also not yet attempted:
+  actually compiling `render.cpp` into an SDL host build -- the toolchain it
+  needs (MSYS2, gcc/g++, SDL2 dev headers, PlatformIO's `native` platform)
+  is still not installed on this machine (confirmed absent again
+  2026-09-13). Re-run the golden diff as the first thing once the soak test
+  ends and the board is available.
 
 **Next steps:**
 1. Build a host-side SDL renderer to replace `tools/preview.py`'s PIL-based
@@ -481,6 +501,29 @@ Grove PORT.A (HY2.0-4P): `G4`, `G5`, power direction via PM1 `BOOST5V_EN_PP`.
   Toolchain prerequisites are **not installed on this machine** as of
   2026-09-13: no MSYS2, no gcc/g++ on PATH, no SDL2 dev files, PlatformIO
   `native` platform not installed. Confirmed by reading source, 2026-09-13.
+
+- `src/render.h`/`src/render.cpp` (the render-module extraction, 2026-09-13)
+  don't include `Arduino.h` themselves, but on the **ESP32 build** it's
+  still present in `render.cpp`'s translation unit regardless: `M5GFX.h` ->
+  `lgfx/v1/platforms/esp32/Bus_SPI.hpp` -> `misc/datawrapper.hpp`
+  transitively includes it (M5GFX's ESP32 backend needs Arduino's `Stream`
+  class), so its macros are still live even though this file never asks for
+  them. Confirmed the hard way: a local `constexpr float DEG_TO_RAD = ...`
+  (meant to replace the `radians()` macro's constant, see the entry above)
+  got silently textually replaced by Arduino.h's own `#define DEG_TO_RAD
+  0.0174...` before the compiler ever parsed it, producing `error: expected
+  unqualified-id before numeric constant`. Renamed to `kDegToRad` to avoid
+  the collision -- value unchanged. Also confirmed by reading `Arduino.h`
+  directly: this ESP32 core's `constrain`, `radians`, and `DEG_TO_RAD` are
+  `#define`s, but `min`/`max` deliberately are not (its own comment: "can't
+  define max() / min() because of conflicts with C++"), so `std::min`/
+  `std::max` were never at risk of the same collision. Net effect: dropping
+  `render.cpp`'s own `#include <Arduino.h>` does make this module's *own*
+  code stop depending on Arduino's macros (the actual goal, and what makes
+  it portable to a build that genuinely never sees `Arduino.h`, like a
+  future SDL host build that never compiles M5GFX's ESP32 backend) -- it
+  just doesn't mean "no Arduino.h in the include graph" is literally true
+  for the ESP32 target specifically. Confirmed live, 2026-09-13.
 
 ---
 
