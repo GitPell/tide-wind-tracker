@@ -7,6 +7,12 @@ coastal location. Wakes on a timer, fetches data over Wi-Fi, redraws, sleeps.
 
 ## Current state (as of 2026-09-05)
 
+**A battery soak test is running (started cycle 289, 2026-09-11). Until told
+otherwise: do not flash, monitor, or otherwise connect to the device -- no
+`pio run -t upload`, no `tools/hil.py`, no `pio device monitor`, no opening
+the serial port. "Run the tests" means host-side compilation only (`pio run`
+without `-t upload`) -- not anything that touches the board.**
+
 **Works, confirmed on real hardware:**
 - Build pipeline: `pio run` regenerates `src/layout.h` from `layout.json` and
   compiles clean.
