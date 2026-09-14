@@ -1,12 +1,32 @@
 #include "render.h"
 
-// TEMPORARY (removed in Task 2): still needed for radians()/constrain()/
-// min()/max(), which the moved draw functions use. Task 2 replaces all four
-// with portable equivalents and drops this include.
-#include <Arduino.h>
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
 
 namespace {
+
 constexpr const uint32_t* PALETTE_RGB = layout::palette::RGB;
+
+// render.cpp no longer includes Arduino.h itself, but on this ESP32 build
+// M5GFX.h pulls it in transitively anyway (platforms/esp32/Bus_SPI.hpp needs
+// Arduino's Stream class) -- so its DEG_TO_RAD macro is still live here even
+// though this file doesn't ask for it. A constant of that exact name would
+// get textually replaced by the macro before the compiler ever saw it, so
+// this one is named kDegToRad to avoid the collision. Its value is copied
+// verbatim from Arduino.h's own definition so the numeric output (which
+// feeds cosf/sinf and gets truncated to pixel coordinates) stays bit-for-bit
+// identical to the pre-refactor build. A future SDL host build wouldn't
+// compile M5GFX's ESP32 backend at all, so Arduino.h (and this whole
+// problem) wouldn't be in its include graph either.
+constexpr float kDegToRad = 0.017453292519943295769236907684886f;
+constexpr float toRadians(float deg) { return deg * kDegToRad; }
+
+template <typename T>
+constexpr T clampT(T amt, T lo, T hi) {
+  return amt < lo ? lo : (amt > hi ? hi : amt);
+}
+
 }  // namespace
 
 const char* compass(int deg) {
@@ -124,10 +144,10 @@ void drawTide(M5Canvas& gfx, const Snapshot& s) {
 
   float lo = s.tide[0].ft, hi = s.tide[0].ft;
   for (int i = 1; i < s.nTide; i++) {
-    lo = min(lo, s.tide[i].ft);
-    hi = max(hi, s.tide[i].ft);
+    lo = std::min(lo, s.tide[i].ft);
+    hi = std::max(hi, s.tide[i].ft);
   }
-  float pad = max(0.4f, (hi - lo) * 0.15f);
+  float pad = std::max(0.4f, (hi - lo) * 0.15f);
   lo -= pad; hi += pad;
 
   time_t t0 = s.tide[0].t, t1 = s.tide[s.nTide - 1].t;
@@ -155,7 +175,7 @@ void drawTide(M5Canvas& gfx, const Snapshot& s) {
     gfx.drawCircle(x, y, EVENT_MARKER_RADIUS, C_BLACK);
   }
 
-  int nx = px(constrain(s.now, t0, t1));
+  int nx = px(clampT(s.now, t0, t1));
   for (int i = 0; i < NOW_LINE_WIDTH; i++) {
     gfx.drawFastVLine(nx + i, y0, y1 - y0, C_RED);
   }
@@ -177,16 +197,16 @@ void drawWind(M5Canvas& gfx, const Snapshot& s) {
   gfx.setFont(&fonts::DejaVu9);  // F_TINY equivalent
   gfx.setTextDatum(textdatum_t::middle_center);
   for (int i = 0; i < 4; i++) {
-    float la = radians(i * 90.0f - 90.0f);
+    float la = toRadians(i * 90.0f - 90.0f);
     gfx.drawString(COMPASS_LABELS[i], cx + int(cosf(la) * lr), cy + int(sinf(la) * lr));
   }
   gfx.setTextDatum(textdatum_t::top_left);
 
-  float a = radians(s.windDir + 180 - 90);
+  float a = toRadians(s.windDir + 180 - 90);
   int tipx = cx + cosf(a) * (r - ARROW_TIP_INSET), tipy = cy + sinf(a) * (r - ARROW_TIP_INSET);
   int tlx  = cx - cosf(a) * (r - ARROW_TAIL_INSET), tly = cy - sinf(a) * (r - ARROW_TAIL_INSET);
   uint32_t ac = windColor(s.windNow);
-  float barbAngle = radians(float(ARROW_BARB_ANGLE_DEG));
+  float barbAngle = toRadians(float(ARROW_BARB_ANGLE_DEG));
   int barbAx = tipx + int(cosf(a + barbAngle) * ARROW_BARB_LENGTH);
   int barbAy = tipy + int(sinf(a + barbAngle) * ARROW_BARB_LENGTH);
   int barbBx = tipx + int(cosf(a - barbAngle) * ARROW_BARB_LENGTH);
@@ -241,13 +261,13 @@ void drawForecast(M5Canvas& gfx, const Snapshot& s) {
   if (!s.nForecast) return;
 
   float peak = 20.0f;
-  for (int i = 0; i < s.nForecast; i++) peak = max(peak, s.forecast[i].kt);
+  for (int i = 0; i < s.nForecast; i++) peak = std::max(peak, s.forecast[i].kt);
 
   int bw = (x1 - x0) / s.nForecast;
   gfx.setFont(&fonts::DejaVu9);  // F_TINY equivalent
   for (int i = 0; i < s.nForecast; i++) {
-    float v = max(0.0f, s.forecast[i].kt);
-    int h = max(BAR_MIN_HEIGHT, int(v / peak * (y1 - y0 - BAR_HEIGHT_MARGIN)));
+    float v = std::max(0.0f, s.forecast[i].kt);
+    int h = std::max(BAR_MIN_HEIGHT, int(v / peak * (y1 - y0 - BAR_HEIGHT_MARGIN)));
     int x = x0 + i * bw;
     gfx.fillRect(x + BAR_INSET, y1 - h, bw - 2 * BAR_INSET, h, windColor(v));
     gfx.drawRect(x + BAR_INSET, y1 - h, bw - 2 * BAR_INSET, h, C_BLACK);
