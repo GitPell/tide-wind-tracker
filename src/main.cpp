@@ -18,63 +18,7 @@
 #include "esp_sntp.h"  // sntp_get_sync_status() -- see setup()'s NTP-wait comment
 
 #include "config.h"
-#include "layout.h"  // GENERATED from layout.json -- see tools/gen_layout_header.py
-
-// ---------------------------------------------------------------- palette ---
-// The render target is now an M5Canvas at color_depth_t::palette_4bit (see
-// drawAll()) -- the smallest M5GFX depth that can hold six distinct colors
-// with an exact palette table and no dithering (palette_2bit only offers 4).
-// LGFX_Sprite's palette-mode draw calls take a palette INDEX as the "color"
-// argument, not an RGB triplet (confirmed by reading
-// misc/colortype.hpp's convert_uint32_to_palette4()), so these constants are
-// now indices 0-5 into PALETTE_RGB below rather than raw RGB values. The
-// panel driver (Panel_ED2208.cpp) still nearest-matches/dithers RGB888
-// against its own native 6-color table on display() -- pixel-identical
-// output only requires that PALETTE_RGB carry the exact same RGB888 bytes
-// that were previously passed straight to M5.Display.
-//
-// Index order (0=black..5=green) is fixed by palette.json -- it must stay in
-// sync with these C_* constants. The RGB888 values themselves come from
-// layout::palette::RGB (generated from palette.json by
-// tools/gen_layout_header.py, see src/layout.h), not a literal here, so
-// tools/preview.py and tools/hil.py can't silently drift from this table --
-// they read palette.json directly at runtime instead of hardcoding a copy.
-static constexpr uint32_t C_BLACK  = 0;
-static constexpr uint32_t C_WHITE  = 1;
-static constexpr uint32_t C_RED    = 2;
-static constexpr uint32_t C_YELLOW = 3;
-static constexpr uint32_t C_BLUE   = 4;
-static constexpr uint32_t C_GREEN  = 5;
-
-static constexpr const uint32_t* PALETTE_RGB = layout::palette::RGB;
-
-static constexpr int SCREEN_W = layout::screen::W;
-static constexpr int SCREEN_H = layout::screen::H;
-
-// ------------------------------------------------------------------- data ---
-struct TidePoint { time_t t; float ft; };
-struct TideEvent { time_t t; float ft; char kind; };  // 'H' or 'L'
-struct WindPoint { time_t t; float kt; };
-
-struct Snapshot {
-  TidePoint tide[26];      int nTide = 0;
-  TideEvent events[10];    int nEvents = 0;
-  WindPoint forecast[24];  int nForecast = 0;
-  float tideNow = 0, windNow = 0, gustNow = 0;
-  int   windDir = 0;
-  float indoorC = 0, indoorRh = 0;
-  int   battery = 0;
-  bool  ok = false;
-  // Sampled once in setup(), after the Wi-Fi/SNTP attempt (whether or not it
-  // succeeded) and before any drawing -- every draw function reads this
-  // instead of calling time(nullptr) itself, so the render is a pure
-  // function of Snapshot and every clock-dependent element (header/footer
-  // clock, tide now-line, next-event pick) agrees with the others. Without
-  // this, each draw function sampling time(nullptr) independently could
-  // straddle a minute (or, for the now-line vs. next-event pick, an actual
-  // event boundary) if the wall clock ticked over mid-render.
-  time_t now = 0;
-};
+#include "render.h"  // Snapshot, palette constants, draw*() -- see src/render.h
 
 // The board fully cuts power between cycles (see sleepUntilNext()), so
 // RTC_DATA_ATTR does not survive a cycle -- only the PM1's own RTC RAM does.
@@ -103,18 +47,6 @@ static time_t parseIso(const char* s) {            // "2026-08-28T14:00"
   if (strptime(s, "%Y-%m-%dT%H:%M", &tmv) == nullptr) return 0;
   tmv.tm_isdst = -1;
   return mktime(&tmv);
-}
-
-static const char* compass(int deg) {
-  static const char* p[16] = {"N","NNE","NE","ENE","E","ESE","SE","SSE",
-                              "S","SSW","SW","WSW","W","WNW","NW","NNW"};
-  return p[int((deg % 360) / 22.5f + 0.5f) % 16];
-}
-
-static uint32_t windColor(float kt) {
-  if (kt < 10) return C_GREEN;
-  if (kt < 20) return C_YELLOW;
-  return C_RED;
 }
 
 // M5Unified has no Sht4x driver on this board -- confirmed by compile error,
@@ -297,291 +229,6 @@ static bool fetchWind(Snapshot& s) {
   return true;
 }
 
-// ------------------------------------------------------------------- draw ---
-// Pixel coordinates come from layout::* (generated from ../layout.json --
-// see tools/gen_layout_header.py). Iterate on layout with tools/preview.py
-// first, then edit layout.json; both consumers pick it up from there.
-
-// Font mapping from tools/preview.py's PIL fonts to bundled M5GFX fonts (see
-// .pio/libdeps/m5stack-papercolor/M5GFX/src/lgfx/Fonts). M5GFX ships no bold
-// DejaVu, so the bold sizes (F_HUGE/F_BIG/F_MED) use FreeSansBold instead;
-// the regular sizes (F_REG/F_SMALL/F_TINY) use the bundled DejaVu, converted
-// from the same DejaVuSans.ttf preview.py uses. Picked one size down from a
-// naive line-height match so on-device text doesn't dwarf preview.py's.
-//   F_HUGE (Bold 46) -> FreeSansBold18pt7b (42px)
-//   F_BIG  (Bold 30) -> FreeSansBold12pt7b (29px)
-//   F_MED  (Bold 18) -> FreeSansBold9pt7b  (22px)
-//   F_REG  (Reg  15) -> DejaVu18           (18px)
-//   F_SMALL(Reg  12) -> DejaVu12           (13px)
-//   F_TINY (Reg  10) -> DejaVu9            (10px)
-
-static void drawHeader(M5Canvas& gfx, const Snapshot& s) {
-  using namespace layout::header;
-  gfx.fillRect(0, 0, SCREEN_W, HEIGHT, C_BLUE);
-  gfx.setTextColor(C_WHITE, C_BLUE);
-  gfx.setTextSize(1);
-
-  gfx.setFont(&fonts::FreeSansBold12pt7b);  // F_BIG equivalent
-  gfx.setCursor(STATION_X, STATION_Y);
-  gfx.print(STATION_LABEL);
-
-  char buf[40];
-  struct tm lt; localtime_r(&s.now, &lt);
-  strftime(buf, sizeof buf, "%a %d %b  %H:%M", &lt);
-  gfx.setFont(&fonts::DejaVu12);  // F_SMALL equivalent
-  gfx.setCursor(DATETIME_X, DATETIME_Y);
-  gfx.print(buf);
-
-  snprintf(buf, sizeof buf, "%.0fC %.0f%%  BAT %d%%",
-           s.indoorC, s.indoorRh, s.battery);
-  using namespace layout::firmware_only::header;
-  gfx.setCursor(SCREEN_W - READOUT_RIGHT_OFFSET, READOUT_Y);
-  gfx.print(buf);
-}
-
-// Side of the trend triangle in drawNowStrip(). Hand-drawn rather than a text
-// glyph because the bundled GFXfont charsets are ASCII-only (0x20-0x7E) --
-// no unicode triangle characters, unlike preview.py's PIL-rendered TTF.
-static constexpr int TREND_ARROW_SIZE = 20;
-
-static void drawNowStrip(M5Canvas& gfx, const Snapshot& s) {
-  using namespace layout::now_strip;
-  const int y0 = Y0_OFFSET;
-  gfx.setTextColor(C_BLACK, C_WHITE);
-
-  gfx.setFont(&fonts::FreeSansBold9pt7b);  // F_MED equivalent
-  gfx.setCursor(LABEL_X, y0 + LABEL_Y);
-  gfx.print("TIDE");
-
-  char buf[16];
-  snprintf(buf, sizeof buf, "%.1f", s.tideNow);
-  gfx.setFont(&fonts::FreeSansBold18pt7b);  // F_HUGE equivalent
-  gfx.setCursor(VALUE_X, y0 + VALUE_Y);
-  gfx.print(buf);
-  int valW = gfx.textWidth(buf);
-  gfx.setFont(&fonts::FreeSansBold9pt7b);  // F_MED equivalent
-  gfx.setCursor(VALUE_X + valW + UNIT_GAP_X, y0 + UNIT_Y);
-  gfx.print("ft");
-
-  // Next tide event strictly after now, mirroring preview.py's "rising"/"nxt"
-  // scan over the hilo events.
-  const TideEvent* nxt = nullptr;
-  for (int i = 0; i < s.nEvents; i++) {
-    if (s.events[i].t > s.now) { nxt = &s.events[i]; break; }
-  }
-  if (!nxt) return;
-
-  bool rising = nxt->kind == 'H';
-  uint32_t col = rising ? C_GREEN : C_RED;
-  int tx = TREND_ARROW_X, ty = y0 + TREND_ARROW_Y, tw = TREND_ARROW_SIZE;
-  if (rising) {
-    gfx.fillTriangle(tx, ty + tw, tx + tw, ty + tw, tx + tw / 2, ty, col);
-  } else {
-    gfx.fillTriangle(tx, ty, tx + tw, ty, tx + tw / 2, ty + tw, col);
-  }
-  gfx.setTextColor(col, C_WHITE);
-  gfx.setFont(&fonts::FreeSansBold9pt7b);  // F_MED equivalent
-  gfx.setCursor(TREND_WORD_X, y0 + TREND_WORD_Y);
-  gfx.print(rising ? "RISING" : "FALLING");
-  gfx.setTextColor(C_BLACK, C_WHITE);
-
-  gfx.setFont(&fonts::DejaVu12);  // F_SMALL equivalent
-  gfx.drawRightString(nxt->kind == 'H' ? "NEXT HIGH" : "NEXT LOW",
-                      SCREEN_W - NEXT_RIGHT_MARGIN, y0 + NEXT_LABEL_DY);
-
-  struct tm nt; localtime_r(&nxt->t, &nt);
-  strftime(buf, sizeof buf, "%H:%M", &nt);
-  gfx.setFont(&fonts::FreeSansBold12pt7b);  // F_BIG equivalent
-  gfx.drawRightString(buf, SCREEN_W - NEXT_RIGHT_MARGIN, y0 + NEXT_TIME_DY);
-
-  snprintf(buf, sizeof buf, "%.1f ft", nxt->ft);
-  gfx.setFont(&fonts::DejaVu12);  // F_SMALL equivalent
-  gfx.drawRightString(buf, SCREEN_W - NEXT_RIGHT_MARGIN, y0 + NEXT_VALUE_DY);
-}
-
-static void drawTide(M5Canvas& gfx, const Snapshot& s) {
-  using namespace layout::tide_box;
-  const int x0 = X0, y0 = Y0, x1 = SCREEN_W - RIGHT_MARGIN, y1 = Y1;
-  gfx.setTextColor(C_BLACK, C_WHITE);
-  gfx.drawRect(x0, y0, x1 - x0, y1 - y0, C_BLACK);
-  if (s.nTide < 2) return;
-
-  float lo = s.tide[0].ft, hi = s.tide[0].ft;
-  for (int i = 1; i < s.nTide; i++) {
-    lo = min(lo, s.tide[i].ft);
-    hi = max(hi, s.tide[i].ft);
-  }
-  float pad = max(0.4f, (hi - lo) * 0.15f);
-  lo -= pad; hi += pad;
-
-  time_t t0 = s.tide[0].t, t1 = s.tide[s.nTide - 1].t;
-  auto px = [&](time_t t) {
-    return x0 + int(float(t - t0) / float(t1 - t0) * (x1 - x0));
-  };
-  auto py = [&](float v) {
-    return y1 - int((v - lo) / (hi - lo) * (y1 - y0));
-  };
-
-  // Vertical fill under the curve. One column at a time is simple and fast
-  // enough; the panel refresh dwarfs the draw time regardless.
-  for (int i = 0; i < s.nTide - 1; i++) {
-    int ax = px(s.tide[i].t),   ay = py(s.tide[i].ft);
-    int bx = px(s.tide[i+1].t), by = py(s.tide[i+1].ft);
-    for (int x = ax; x <= bx; x++) {
-      int y = ay + (bx > ax ? (by - ay) * (x - ax) / (bx - ax) : 0);
-      gfx.drawFastVLine(x, y, y1 - y, C_BLUE);
-    }
-  }
-
-  for (int i = 0; i < s.nEvents; i++) {
-    if (s.events[i].t < t0 || s.events[i].t > t1) continue;
-    int x = px(s.events[i].t), y = py(s.events[i].ft);
-    bool high = s.events[i].kind == 'H';
-    gfx.fillCircle(x, y, EVENT_MARKER_RADIUS, high ? C_YELLOW : C_WHITE);
-    gfx.drawCircle(x, y, EVENT_MARKER_RADIUS, C_BLACK);
-  }
-
-  int nx = px(constrain(s.now, t0, t1));
-  for (int i = 0; i < NOW_LINE_WIDTH; i++) {
-    gfx.drawFastVLine(nx + i, y0, y1 - y0, C_RED);
-  }
-}
-
-static void drawWind(M5Canvas& gfx, const Snapshot& s) {
-  using namespace layout::wind;
-  const int wy = Y;
-  gfx.setTextColor(C_BLACK, C_WHITE);
-  gfx.setFont(&fonts::FreeSansBold9pt7b);  // F_MED equivalent
-  gfx.setCursor(LABEL_X, wy);
-  gfx.print("WIND");
-
-  const int cx = COMPASS_CX, cy = wy + COMPASS_DY, r = COMPASS_R;
-  gfx.drawCircle(cx, cy, r, C_BLACK);
-
-  // N/E/S/W labels around the rose, matching preview.py's compass_label_*.
-  static const char* COMPASS_LABELS[4] = {"N", "E", "S", "W"};
-  int lr = r + COMPASS_LABEL_RADIUS_OFFSET;
-  gfx.setFont(&fonts::DejaVu9);  // F_TINY equivalent
-  gfx.setTextDatum(textdatum_t::middle_center);
-  for (int i = 0; i < 4; i++) {
-    float la = radians(i * 90.0f - 90.0f);
-    gfx.drawString(COMPASS_LABELS[i], cx + int(cosf(la) * lr), cy + int(sinf(la) * lr));
-  }
-  gfx.setTextDatum(textdatum_t::top_left);
-
-  float a = radians(s.windDir + 180 - 90);
-  int tipx = cx + cosf(a) * (r - ARROW_TIP_INSET), tipy = cy + sinf(a) * (r - ARROW_TIP_INSET);
-  int tlx  = cx - cosf(a) * (r - ARROW_TAIL_INSET), tly = cy - sinf(a) * (r - ARROW_TAIL_INSET);
-  uint32_t ac = windColor(s.windNow);
-  // Without a barb, the shaft is the same width at both ends, so nothing on
-  // the panel actually marks which end is the tip -- matches preview.py's
-  // two angled strokes back from the tip (arrow_barb_angle_deg/_length).
-  float barbAngle = radians(float(ARROW_BARB_ANGLE_DEG));
-  int barbAx = tipx + int(cosf(a + barbAngle) * ARROW_BARB_LENGTH);
-  int barbAy = tipy + int(sinf(a + barbAngle) * ARROW_BARB_LENGTH);
-  int barbBx = tipx + int(cosf(a - barbAngle) * ARROW_BARB_LENGTH);
-  int barbBy = tipy + int(sinf(a - barbAngle) * ARROW_BARB_LENGTH);
-  // Black underlay first, so a yellow arrow still reads against white.
-  for (int pass = 0; pass < 2; pass++) {
-    uint32_t col = pass ? ac : C_BLACK;
-    int w = pass ? ARROW_COLOR_WIDTH : ARROW_UNDERLAY_WIDTH;
-    for (int o = -w / 2; o <= w / 2; o++) {
-      gfx.drawLine(tlx + o, tly, tipx + o, tipy, col);
-      gfx.drawLine(tlx, tly + o, tipx, tipy + o, col);
-      gfx.drawLine(tipx + o, tipy, barbAx + o, barbAy, col);
-      gfx.drawLine(tipx, tipy + o, barbAx, barbAy + o, col);
-      gfx.drawLine(tipx + o, tipy, barbBx + o, barbBy, col);
-      gfx.drawLine(tipx, tipy + o, barbBx, barbBy + o, col);
-    }
-  }
-
-  char buf[48];
-  using namespace layout::firmware_only::wind;
-  snprintf(buf, sizeof buf, "%.0f", s.windNow);
-  gfx.setFont(&fonts::FreeSansBold18pt7b);  // F_HUGE equivalent
-  gfx.setCursor(READING_X, wy + READING_DY);
-  gfx.print(buf);
-  int numW = gfx.textWidth(buf);
-  gfx.setFont(&fonts::FreeSansBold9pt7b);  // F_MED equivalent
-  gfx.setCursor(READING_X + numW + KT_GAP, wy + KT_DY);
-  gfx.print("kt");
-
-  gfx.setFont(&fonts::DejaVu18);  // F_REG equivalent
-  snprintf(buf, sizeof buf, "GUST %.0f kt", s.gustNow);
-  gfx.setCursor(GUST_X, wy + GUST_DY); gfx.print(buf);
-  snprintf(buf, sizeof buf, "FROM %s %d", compass(s.windDir), s.windDir);
-  gfx.setCursor(FROM_X, wy + FROM_DY); gfx.print(buf);
-  // DejaVu18's charset is ASCII-only (0x20-0x7E), no degree sign -- draw a
-  // small ring instead, matching preview.py's trailing "°".
-  int fromW = gfx.textWidth(buf);
-  static constexpr int DEG_RADIUS = 2, DEG_GAP = 2, DEG_Y_OFFSET = 3;
-  gfx.drawCircle(FROM_X + fromW + DEG_GAP + DEG_RADIUS,
-                 wy + FROM_DY + DEG_Y_OFFSET + DEG_RADIUS, DEG_RADIUS, C_BLACK);
-
-  // Speed band as a solid chip -- coloured text is unreadable on this panel.
-  gfx.fillRect(SCREEN_W - CHIP_RIGHT_OFFSET, wy + CHIP_DY, CHIP_W, CHIP_H, ac);
-  gfx.drawRect(SCREEN_W - CHIP_RIGHT_OFFSET, wy + CHIP_DY, CHIP_W, CHIP_H, C_BLACK);
-}
-
-static void drawForecast(M5Canvas& gfx, const Snapshot& s) {
-  using namespace layout::forecast;
-  const int x0 = X0, y1 = BOTTOM, x1 = SCREEN_W - RIGHT_MARGIN, y0 = TOP;
-  gfx.drawFastHLine(x0, y1, x1 - x0, C_BLACK);
-
-  gfx.setTextColor(C_BLACK, C_WHITE);
-  gfx.setFont(&fonts::DejaVu12);  // F_SMALL equivalent
-  gfx.drawRightString("WIND, NEXT 24H (kt)", SCREEN_W - RIGHT_MARGIN, y0 - LABEL_DY_ABOVE_TOP);
-
-  if (!s.nForecast) return;
-
-  float peak = 20.0f;
-  for (int i = 0; i < s.nForecast; i++) peak = max(peak, s.forecast[i].kt);
-
-  int bw = (x1 - x0) / s.nForecast;
-  gfx.setFont(&fonts::DejaVu9);  // F_TINY equivalent
-  for (int i = 0; i < s.nForecast; i++) {
-    float v = max(0.0f, s.forecast[i].kt);
-    int h = max(BAR_MIN_HEIGHT, int(v / peak * (y1 - y0 - BAR_HEIGHT_MARGIN)));
-    int x = x0 + i * bw;
-    gfx.fillRect(x + BAR_INSET, y1 - h, bw - 2 * BAR_INSET, h, windColor(v));
-    gfx.drawRect(x + BAR_INSET, y1 - h, bw - 2 * BAR_INSET, h, C_BLACK);
-
-    struct tm ft; localtime_r(&s.forecast[i].t, &ft);
-    if (ft.tm_hour % 6 == 0) {
-      char hbuf[4];
-      snprintf(hbuf, sizeof hbuf, "%02d", ft.tm_hour);
-      gfx.drawCenterString(hbuf, x + bw / 2, y1 + HOUR_LABEL_DY);
-    }
-  }
-}
-
-static void drawFooter(M5Canvas& gfx, const Snapshot& s) {
-  using namespace layout::footer;
-  gfx.setTextColor(C_BLACK, C_WHITE);
-  gfx.setFont(&fonts::DejaVu9);  // F_TINY equivalent
-  gfx.setCursor(LEFT_X, Y);
-  // DejaVu9's charset is ASCII-only (0x20-0x7E), no middle dot -- use a
-  // hyphen in place of preview.py's "·".
-  gfx.print("NOAA CO-OPS - Open-Meteo");
-
-  struct tm lt; localtime_r(&s.now, &lt);
-  char buf[16];
-  strftime(buf, sizeof buf, "UPD %H:%M", &lt);
-  gfx.drawRightString(buf, SCREEN_W - RIGHT_MARGIN, Y);
-}
-
-// Allocates and palettes the off-screen canvas shared by drawAll() and the
-// ghost-clearing pass. M5Canvas(&M5.Display) defaults _psram = true (see
-// M5GFX.h), so this comes out of the 8MB PSRAM, not the ~320KB internal
-// heap -- but ESP.getFreeHeap() is still sampled around allocation in
-// drawAll() per the internal-heap headroom this was asked to confirm.
-static bool initCanvas(M5Canvas& canvas) {
-  canvas.setColorDepth(lgfx::color_depth_t::palette_4bit);
-  if (!canvas.createSprite(SCREEN_W, SCREEN_H)) return false;
-  canvas.createPalette(PALETTE_RGB, 6);
-  return true;
-}
-
 // Ghost-clearing pass (see setup()) draws directly to M5.Display previously;
 // now routed through the same canvas path as drawAll() so it never touches
 // M5.Display with a raw palette-index "color" value by mistake.
@@ -646,6 +293,14 @@ static void drawAll(const Snapshot& s) {
 // See test/fixtures/example.json for a worked example and tools/hil.py for
 // the host-side encoder/decoder.
 static void tier1ParseSnapshot(JsonDocument& doc, Snapshot& s) {
+  // Defaults to STATION_LABEL (config.h) when a fixture omits the field --
+  // every existing fixture predates this field, and that default is exactly
+  // what those fixtures rendered with before stationLabel existed (drawHeader()
+  // read the STATION_LABEL macro directly), so their goldens stay valid
+  // unchanged. See render.h's Snapshot::stationLabel comment.
+  const char* label = doc["stationLabel"] | STATION_LABEL;
+  snprintf(s.stationLabel, sizeof s.stationLabel, "%s", label);
+
   s.tideNow  = doc["tideNow"]  | 0.0f;
   s.windNow  = doc["windNow"]  | 0.0f;
   s.gustNow  = doc["gustNow"]  | 0.0f;
@@ -978,6 +633,7 @@ void setup() {
   Serial.printf("\n=== cycle %lu ===\n", (unsigned long)cycle);
 
   Snapshot s;
+  snprintf(s.stationLabel, sizeof s.stationLabel, "%s", STATION_LABEL);
   if (!readSht40(&s.indoorC, &s.indoorRh)) {
     s.indoorC = 0; s.indoorRh = 0;
   }
