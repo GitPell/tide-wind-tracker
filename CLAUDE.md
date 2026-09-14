@@ -86,6 +86,8 @@ API differ. Before writing or changing any hardware-facing code:
    at the exact versions PlatformIO resolved. Do not infer method names, and do
    not read a separate clone that may have drifted from what is built.
    - `M5Unified/`, `M5GFX/`, `M5PM1/`, `ArduinoJson/`
+     (`M5GFX/` may actually be `M5GFX@src-<hash>/` -- hash tied to the
+     resolved git commit -- look for that if the plain name doesn't exist)
    - If this directory is empty, run `pio run` once to populate it.
 2. **For how M5 actually drives this hardware, read
    `refs/M5PaperColor-UserDemo/`.** This is the factory firmware and is the
@@ -164,8 +166,8 @@ Grove PORT.A (HY2.0-4P): `G4`, `G5`, power direction via PM1 `BOOST5V_EN_PP`.
 
 - M5GFX ships **no bold DejaVu** -- only regular-weight `DejaVu9/12/18/24/40
   /56/72` (GFXfont, converted straight from `DejaVuSans.ttf`, named by pixel
-  line-height, in `.pio/libdeps/m5stack-papercolor/M5GFX/src/lgfx/Fonts/
-  Custom/`). For bold, the closest bundled family is Adafruit's "Free Fonts"
+  line-height, in `.pio/libdeps/m5stack-papercolor/M5GFX@src-<hash>/src/
+  lgfx/Fonts/Custom/` -- hash tied to the resolved git commit). For bold, the closest bundled family is Adafruit's "Free Fonts"
   `FreeSansBold9/12/18/24pt7b` (nominal point size, not pixel height, and a
   different type family -- visually close, not identical). Mapping settled
   on for this project (see the comment above `drawHeader()` in
@@ -179,8 +181,8 @@ Grove PORT.A (HY2.0-4P): `G4`, `G5`, power direction via PM1 `BOOST5V_EN_PP`.
   degree ring in `drawWind()`. Also: the font before any `setFont()` call is
   `Font0`, a 6x8 GLCD bitmap font -- `setTextSize()` alone changes scale, not
   font family, and does not get you a bigger typeface. Confirmed by reading
-  `.pio/libdeps/m5stack-papercolor/M5GFX/src/lgfx/Fonts/` and testing
-  on-device, 2026-08-28.
+  `.pio/libdeps/m5stack-papercolor/M5GFX@src-<hash>/src/lgfx/Fonts/` and
+  testing on-device, 2026-08-28.
 
 - `M5.begin()` does **not** power the e-paper rail on this board. M5Unified's
   own board-init switch for `board_M5PaperColor`
@@ -263,7 +265,8 @@ Grove PORT.A (HY2.0-4P): `G4`, `G5`, power direction via PM1 `BOOST5V_EN_PP`.
   to reset to `textdatum_t::top_left` right after using `middle_center` for
   true 2-axis-centered text (e.g. the compass N/E/S/W labels in `drawWind()`)
   in case future code adds a bare `drawString()` call. Confirmed by reading
-  `M5GFX/src/lgfx/v1/LGFXBase.hpp` and an example `.ino`'s usage, 2026-08-29.
+  `M5GFX@src-<hash>/src/lgfx/v1/LGFXBase.hpp` (hash tied to the resolved
+  git commit) and an example `.ino`'s usage, 2026-08-29.
 
 - Arduino-ESP32's `getLocalTime()` (`esp32-hal-time.c`) does **not** mean "NTP
   has synced" -- it just loops until `time(nullptr)`'s `tm_year > 2016`, with
@@ -458,6 +461,26 @@ Grove PORT.A (HY2.0-4P): `G4`, `G5`, power direction via PM1 `BOOST5V_EN_PP`.
   line to actually arrive after it gives up, rather than the host timing
   out first and reporting a generic timeout instead of the device's real
   error.
+
+- A host-side SDL renderer (see "Next steps") is feasible but not yet
+  built. M5GFX 0.2.28 vendors LovyanGFX's SDL backend
+  (`lgfx/v1/platforms/sdl/`) -- it compiles to an empty translation unit on
+  the ESP32 target (the whole file is gated behind `#if defined(SDL_h_)`),
+  so seeing it in the build log does not mean SDL is active. Backend
+  selection is automatic: `lgfx/v1/platforms/device.hpp`'s `#if/#elif`
+  chain picks the SDL panel when neither `ESP_PLATFORM` nor `ARDUINO` is
+  defined and SDL2 headers are on the include path -- no manual
+  `#include <SDL.h>` needed. M5GFX ships a working example at
+  `examples/PlatformIO_SDL/` (own `platformio.ini`, README with
+  Windows/MSYS2 + SDL2 setup steps). `M5Canvas` is defined in `M5GFX.h`
+  itself, not M5Unified, and its constructor takes a generic `LovyanGFX*`
+  -- portable to a host build; only `&M5.Display` as the parent pointer is
+  M5Unified-specific. `radians()`/`constrain()`/`min()`/`max()` used
+  inside the draw functions are Arduino.h macros, not standard library --
+  a host build needs `std::min`/`std::max` and local helpers instead.
+  Toolchain prerequisites are **not installed on this machine** as of
+  2026-09-13: no MSYS2, no gcc/g++ on PATH, no SDL2 dev files, PlatformIO
+  `native` platform not installed. Confirmed by reading source, 2026-09-13.
 
 ---
 
