@@ -59,10 +59,14 @@ coastal location. Wakes on a timer, fetches data over Wi-Fi, redraws, sleeps.
     `sleepUntilNext()` defaulted to 0 instead of -1, so `mktime()` resolved
     the wake time under the wrong (standard, not daylight) UTC offset. See
     "Verified corrections" for the full mechanism. Fixed in source
-    (`nextTm.tm_isdst = -1;` before the `mktime()` call) but **not yet
-    confirmed on real hardware** -- don't compute a days-per-charge number
-    from the 100%->98% drop until a fresh cycle or two confirms the fix
-    (see "Next steps").
+    (`nextTm.tm_isdst = -1;` before the `mktime()` call, commit `237ef2f`)
+    and **confirmed on real hardware, 2026-09-16**: a fresh soak segment
+    (cycle 385, 14:32:48 -> cycle 397, 20:22:38, same day) ran at ~29.2
+    min/cycle -- in line with the ~31.3 min expected baseline (~78s awake +
+    30 min) and nowhere near the old ~89.3, confirming the fix. The
+    100%->98% figure from the *original* (pre-fix) soak still shouldn't be
+    used for a days-per-charge estimate (see "Design constraints"), but the
+    cycles-per-day term itself is no longer in question.
 
 **Not yet exercised:**
 - Current draw (battery life itself is now soak-tested, see above). The
@@ -80,17 +84,9 @@ coastal location. Wakes on a timer, fetches data over Wi-Fi, redraws, sleeps.
   `native` platform -- still not installed on this machine, confirmed
   absent again 2026-09-13) and writing a host entry point modeled on
   M5GFX's `examples/PlatformIO_SDL/`.
-- The `tm_isdst` fix for the sleep-interval bug (`sleepUntilNext()`,
-  `src/main.cpp`, 2026-09-16 -- see "Verified corrections"). Root-caused
-  and fixed in source, and confirmed by decoding the diagnostic epoch that
-  exposed it, but **not yet confirmed by an actual on-device wake cycle**.
 
 **Next steps:**
-1. Confirm the `tm_isdst` fix on real hardware -- a handful of cycles (or
-   a short soak) at the production 30-min cadence should now show ~31
-   min/cycle, not ~89. See "Verified corrections" for the bug and the
-   fix's file/line.
-2. Finish the host-side SDL renderer to replace `tools/preview.py`'s
+1. Finish the host-side SDL renderer to replace `tools/preview.py`'s
    PIL-based preview -- PIL is a static-image proxy for what M5GFX itself
    draws; an SDL build linking the real M5GFX/LovyanGFX drawing code would
    run the actual render path during layout iteration instead of a
@@ -98,16 +94,18 @@ coastal location. Wakes on a timer, fetches data over Wi-Fi, redraws, sleeps.
    and verified; what remains is installing the toolchain (MSYS2, gcc/g++,
    SDL2 dev headers, PlatformIO's `native` platform) and writing a host
    entry point modeled on M5GFX's `examples/PlatformIO_SDL/`.
-3. Re-derive the battery budget from an actual current measurement, not
+2. Re-derive the battery budget from an actual current measurement, not
    arithmetic on a corrected time -- see "Design constraints" and the
    `M5.begin()` entry in "Verified corrections". Measured awake time
    (~78s/cycle) is ~4x the original ~20s assumption, but the mA figures
    (~150mA average awake, 92.53uA standby) were never measured either, and
    awake current likely doesn't scale linearly across such different
    phases (a mostly memory/I2C-bound `M5.begin()`, Wi-Fi TX, and an actual
-   panel refresh probably don't draw the same). Don't combine this with a
-   cycles-per-day figure until item 1 above is confirmed on hardware.
-4. Wi-Fi `NO_AP_FOUND` still unresolved. `connectWifi()` (`src/main.cpp`)
+   panel refresh probably don't draw the same). The cycles-per-day term is
+   no longer blocked (the `tm_isdst` fix is confirmed -- see "Current
+   state"), but a days-per-charge figure still needs the mA measurement
+   this item is about before it means anything.
+3. Wi-Fi `NO_AP_FOUND` still unresolved. `connectWifi()` (`src/main.cpp`)
    only distinguishes connected vs. not, via `WiFi.status() != WL_CONNECTED`
    in a timeout loop -- it doesn't log or branch on *which* status came
    back, so a `NO_AP_FOUND` occurrence can't yet be told apart from a wrong
@@ -591,9 +589,10 @@ Grove PORT.A (HY2.0-4P): `G4`, `G5`, power direction via PM1 `BOOST5V_EN_PP`.
   in `src/`, and both already did this correctly -- this was the only
   instance of the bug class. `tools/*.py` never goes through
   `mktime()`/`tm_isdst` (uses naive `datetime.strptime()`), so the sweep
-  found nothing there either. Fixed in source and compiles clean
-  (`pio run -e m5stack-papercolor`), 2026-09-16 -- **not yet confirmed on
-  real hardware**, see "Current state" / "Next steps".
+  found nothing there either. Fixed in source, commit `237ef2f`, and
+  **confirmed on real hardware, 2026-09-16**: a fresh soak segment (cycle
+  385 -> cycle 397, same day) ran at ~29.2 min/cycle against the ~31.3 min
+  expected baseline -- see "Current state" for the full readout.
 
 ---
 
@@ -626,12 +625,15 @@ Grove PORT.A (HY2.0-4P): `G4`, `G5`, power direction via PM1 `BOOST5V_EN_PP`.
   at least qualitatively month-shaped, not week-shaped (100%->98% over 45
   cycles / 66h57m) -- but don't treat that as confirming the "48
   cycles/day" arithmetic above: the soak's observed cadence was 89.3
-  minutes/cycle against the configured `UPDATE_MINUTES=30`. Root-caused
-  2026-09-16 as a fixed `tm_isdst` bug (~58-60 min of additive excess sleep
-  every cycle, not a multiplicative one) -- see "Verified corrections".
-  Fixed in source but not yet confirmed on real hardware. No days-per-charge
-  number should be computed until that confirmation lands (see "Next
-  steps").
+  minutes/cycle against the configured `UPDATE_MINUTES=30`. Root-caused and
+  fixed 2026-09-16 -- a `tm_isdst` bug (~58-60 min of additive excess sleep
+  every cycle, not a multiplicative one), confirmed resolved on real
+  hardware (~29.2 min/cycle post-fix, see "Verified corrections" and
+  "Current state"). The cycles-per-day term of the arithmetic above is
+  therefore no longer in question (~29-31 min/cycle implies ~46-48
+  cycles/day, close to the original 48/day assumption) -- but a
+  days-per-charge number still isn't computable, because the mA figures
+  themselves were never measured (see "Next steps").
 
 ---
 
