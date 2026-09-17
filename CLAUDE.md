@@ -53,11 +53,16 @@ coastal location. Wakes on a timer, fetches data over Wi-Fi, redraws, sleeps.
     ~50s `M5.begin()` cost (see "Verified corrections") is not the problem
     it looked like when only the time budget was known.
   - The observed interval was **89.3 minutes/cycle against a configured
-    `UPDATE_MINUTES=30`** (`src/config.h`) -- almost exactly 3x. This is an
-    **open bug, not a settled figure** -- cause unknown. Don't compute a
-    days-per-charge number from the 100%->98% drop until it's understood,
-    since it changes the cycles-per-day arithmetic directly (see "Next
-    steps" and "Design constraints").
+    `UPDATE_MINUTES=30`** (`src/config.h`). Root-caused 2026-09-16: not a
+    multiplicative bug (a follow-up rerun at `UPDATE_MINUTES=2` added the
+    same ~58-60 min excess, not a scaled one) -- `nextTm.tm_isdst` in
+    `sleepUntilNext()` defaulted to 0 instead of -1, so `mktime()` resolved
+    the wake time under the wrong (standard, not daylight) UTC offset. See
+    "Verified corrections" for the full mechanism. Fixed in source
+    (`nextTm.tm_isdst = -1;` before the `mktime()` call) but **not yet
+    confirmed on real hardware** -- don't compute a days-per-charge number
+    from the 100%->98% drop until a fresh cycle or two confirms the fix
+    (see "Next steps").
 
 **Not yet exercised:**
 - Current draw (battery life itself is now soak-tested, see above). The
@@ -75,14 +80,16 @@ coastal location. Wakes on a timer, fetches data over Wi-Fi, redraws, sleeps.
   `native` platform -- still not installed on this machine, confirmed
   absent again 2026-09-13) and writing a host entry point modeled on
   M5GFX's `examples/PlatformIO_SDL/`.
+- The `tm_isdst` fix for the sleep-interval bug (`sleepUntilNext()`,
+  `src/main.cpp`, 2026-09-16 -- see "Verified corrections"). Root-caused
+  and fixed in source, and confirmed by decoding the diagnostic epoch that
+  exposed it, but **not yet confirmed by an actual on-device wake cycle**.
 
 **Next steps:**
-1. Root-cause the sleep-interval discrepancy found by the soak test: 89.3
-   minutes/cycle observed against `UPDATE_MINUTES=30` (`src/config.h`) --
-   almost exactly 3x. This is a real bug on the production path, not just
-   a measurement question, and it blocks computing a days-per-charge figure
-   from the soak's battery drop (item 3 below) since it changes the
-   cycles-per-day term directly.
+1. Confirm the `tm_isdst` fix on real hardware -- a handful of cycles (or
+   a short soak) at the production 30-min cadence should now show ~31
+   min/cycle, not ~89. See "Verified corrections" for the bug and the
+   fix's file/line.
 2. Finish the host-side SDL renderer to replace `tools/preview.py`'s
    PIL-based preview -- PIL is a static-image proxy for what M5GFX itself
    draws; an SDL build linking the real M5GFX/LovyanGFX drawing code would
@@ -99,7 +106,7 @@ coastal location. Wakes on a timer, fetches data over Wi-Fi, redraws, sleeps.
    awake current likely doesn't scale linearly across such different
    phases (a mostly memory/I2C-bound `M5.begin()`, Wi-Fi TX, and an actual
    panel refresh probably don't draw the same). Don't combine this with a
-   cycles-per-day figure until item 1 above is resolved.
+   cycles-per-day figure until item 1 above is confirmed on hardware.
 4. Wi-Fi `NO_AP_FOUND` still unresolved. `connectWifi()` (`src/main.cpp`)
    only distinguishes connected vs. not, via `WiFi.status() != WL_CONNECTED`
    in a timeout loop -- it doesn't log or branch on *which* status came
@@ -538,6 +545,56 @@ Grove PORT.A (HY2.0-4P): `G4`, `G5`, power direction via PM1 `BOOST5V_EN_PP`.
   just doesn't mean "no Arduino.h in the include graph" is literally true
   for the ESP32 target specifically. Confirmed live, 2026-09-13.
 
+- **The soak-test sleep-interval bug** (89.3 min/cycle observed against a
+  configured `UPDATE_MINUTES=30` -- ~58-60 min of excess sleep every cycle,
+  reproducing identically regardless of the configured interval) was a
+  `tm_isdst` bug in `sleepUntilNext()` (`src/main.cpp`), not an RX8130
+  register issue. `nextTm` is built as `struct tm nextTm = {};`, which
+  zero-initializes `tm_isdst` to `0` ("assume standard time"). `TZ_STRING`
+  (`config.h`) is `PST8PDT,M3.2.0,M11.1.0` -- a DST-observing zone, and the
+  device was running during DST (PDT, UTC-7) when this was diagnosed. Fed
+  `tm_isdst=0`, `mktime()` computed the epoch as if the wall-clock digits
+  it was given were **standard-time (PST, UTC-8)** digits, one absolute
+  hour later than what those same digits mean under the real, active PDT
+  rule -- so the alarm ends up armed for an epoch that reads back as one
+  hour later than intended, every time, independent of `UPDATE_MINUTES`
+  (confirmed by a follow-up rerun at `UPDATE_MINUTES=2`, which added the
+  same ~58-60 min excess rather than a scaled one -- ruling out a
+  multiplicative RX8130-side cause and pointing at a fixed offset instead).
+  **Dormant outside DST**: whenever standard time is actually in effect
+  (i.e. outside the `M3.2.0`-`M11.1.0` window), `tm_isdst=0` happens to be
+  correct by coincidence and the bug doesn't reproduce -- so it would not
+  have shown up in a winter soak test.
+  **The trap that delayed diagnosis**: a temporary diagnostic that logged
+  `nextTm` after `mktime()`, the `time_t` it returned, and that same
+  `time_t` round-tripped through `localtime_r()` initially looked like it
+  *ruled out* `tm_isdst` -- `mktime()`'s output and the `localtime_r()`
+  round-trip agreed with each other, and `mktime()` reported `tm_isdst=1`
+  (correctly identifying DST as active). But `mktime()`'s post-call
+  `tm_isdst`/fields describe **the epoch it decided to resolve to**, not a
+  validation of the caller's original input -- it does not re-check "was
+  the isdst you gave me actually correct for these digits." Once `mktime()`
+  had already misapplied the PST offset to compute the epoch, that epoch
+  *was*, by then, genuinely a DST-era timestamp one hour later, so
+  `localtime_r()` reading it back under the real DST rule was always going
+  to agree with `mktime()`'s own output -- self-consistency between the two
+  proved only that both functions were internally correct given the
+  (already-wrong) epoch, not that the epoch itself was right. Decoding the
+  logged epoch to UTC (`date -u -r <epoch>`) and comparing it against both
+  the PST and PDT interpretation of the intended local time is what
+  actually separated the two candidates: the PST interpretation of the
+  *intended* digits matched the epoch exactly, confirming the offset
+  mistake. Fix: `nextTm.tm_isdst = -1;` before the `mktime()` call (lets
+  `mktime()` determine DST itself), matching the pattern already used by
+  `parseLocal()`/`parseIso()` elsewhere in this same file. Confirmed by
+  grep that those two functions were the only other `mktime()` call sites
+  in `src/`, and both already did this correctly -- this was the only
+  instance of the bug class. `tools/*.py` never goes through
+  `mktime()`/`tm_isdst` (uses naive `datetime.strptime()`), so the sweep
+  found nothing there either. Fixed in source and compiles clean
+  (`pio run -e m5stack-papercolor`), 2026-09-16 -- **not yet confirmed on
+  real hardware**, see "Current state" / "Next steps".
+
 ---
 
 ## Design constraints for this project
@@ -569,10 +626,12 @@ Grove PORT.A (HY2.0-4P): `G4`, `G5`, power direction via PM1 `BOOST5V_EN_PP`.
   at least qualitatively month-shaped, not week-shaped (100%->98% over 45
   cycles / 66h57m) -- but don't treat that as confirming the "48
   cycles/day" arithmetic above: the soak's observed cadence was 89.3
-  minutes/cycle against the configured `UPDATE_MINUTES=30`, an unexplained
-  ~3x gap (see "Next steps", now the top item) that changes the
-  cycles-per-day term directly. No days-per-charge number should be
-  computed until that's resolved.
+  minutes/cycle against the configured `UPDATE_MINUTES=30`. Root-caused
+  2026-09-16 as a fixed `tm_isdst` bug (~58-60 min of additive excess sleep
+  every cycle, not a multiplicative one) -- see "Verified corrections".
+  Fixed in source but not yet confirmed on real hardware. No days-per-charge
+  number should be computed until that confirmation lands (see "Next
+  steps").
 
 ---
 

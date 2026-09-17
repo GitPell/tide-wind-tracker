@@ -592,6 +592,11 @@ static void sleepUntilNext() {
     time_t next = time(nullptr) + time_t(UPDATE_MINUTES) * 60;
     localtime_r(&next, &nextTm);
   }
+  // tm_isdst must be -1 (let mktime() resolve DST itself), not the 0 that
+  // struct tm nextTm = {} leaves it at -- see CLAUDE.md Verified corrections
+  // for how the 0 default cost a real hour here. Matches parseLocal()/
+  // parseIso() above.
+  nextTm.tm_isdst = -1;
   mktime(&nextTm);  // normalize tm_min overflow into tm_hour/tm_mday
   M5.Rtc.setAlarmIRQ(&nextTm);
 
