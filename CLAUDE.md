@@ -46,6 +46,19 @@ coastal location. Wakes on a timer, fetches data over Wi-Fi, redraws, sleeps.
   `m5stack-papercolor-test`, ran the suite, flashed `m5stack-papercolor`
   back to resume it; the PM1-RTC-RAM cycle counter is untouched by
   reflashing, so the soak's cycle count continued from where it left off).
+- The host-side SDL preview (`pio run -e native -t upload`,
+  `src/sdl_main.cpp`): links the real M5GFX/LovyanGFX drawing code in
+  `src/render.cpp` against M5GFX's own SDL backend, instead of
+  `tools/preview.py`'s separate PIL reimplementation of the same layout.
+  Toolchain (MSYS2, MinGW-w64 GCC, SDL2 dev files, PlatformIO's `native`
+  platform) installed and working, 2026-09-16. Confirmed **byte-for-byte
+  identical** to the real device's output: `tools/hil.py decode-raw`
+  against a `SDL_PREVIEW_DUMP_RAW` dump of `test/fixtures/example.json`
+  reports `MATCH` against `test/golden/example.png` -- not just visually
+  similar, the exact same bytes. Three real bugs found and fixed getting
+  there (a rotation mismatch, a timezone mismatch, and a wrong fallback
+  station label -- none in `render.cpp` itself) -- see "Verified
+  corrections".
 - The battery soak test completed: started cycle 289 on 2026-09-11 at 15:11
   at 100% battery, ended cycle 334 on 2026-09-14 at 10:08 at 98% -- 45
   cycles over 66h57m. Two findings:
@@ -76,25 +89,9 @@ coastal location. Wakes on a timer, fetches data over Wi-Fi, redraws, sleeps.
   Real measured awake time is ~78s/cycle against an original ~20s
   assumption, but per the soak result above, that gap looks less alarming
   now that real multi-day drain is known to be month-shaped.
-- The host-side SDL renderer. The render-module extraction it depends on is
-  **done and verified**: `src/render.h`/`src/render.cpp` compile free of
-  Arduino/M5Unified/network includes and produce pixel-identical output
-  (see the bullet above and "Verified corrections"). What remains is
-  installing the toolchain (MSYS2, gcc/g++, SDL2 dev headers, PlatformIO's
-  `native` platform -- still not installed on this machine, confirmed
-  absent again 2026-09-13) and writing a host entry point modeled on
-  M5GFX's `examples/PlatformIO_SDL/`.
 
 **Next steps:**
-1. Finish the host-side SDL renderer to replace `tools/preview.py`'s
-   PIL-based preview -- PIL is a static-image proxy for what M5GFX itself
-   draws; an SDL build linking the real M5GFX/LovyanGFX drawing code would
-   run the actual render path during layout iteration instead of a
-   parallel reimplementation of it. The render-module extraction is done
-   and verified; what remains is installing the toolchain (MSYS2, gcc/g++,
-   SDL2 dev headers, PlatformIO's `native` platform) and writing a host
-   entry point modeled on M5GFX's `examples/PlatformIO_SDL/`.
-2. Re-derive the battery budget from an actual current measurement, not
+1. Re-derive the battery budget from an actual current measurement, not
    arithmetic on a corrected time -- see "Design constraints" and the
    `M5.begin()` entry in "Verified corrections". Measured awake time
    (~78s/cycle) is ~4x the original ~20s assumption, but the mA figures
@@ -105,7 +102,7 @@ coastal location. Wakes on a timer, fetches data over Wi-Fi, redraws, sleeps.
    no longer blocked (the `tm_isdst` fix is confirmed -- see "Current
    state"), but a days-per-charge figure still needs the mA measurement
    this item is about before it means anything.
-3. Wi-Fi `NO_AP_FOUND` still unresolved. `connectWifi()` (`src/main.cpp`)
+2. Wi-Fi `NO_AP_FOUND` still unresolved. `connectWifi()` (`src/main.cpp`)
    only distinguishes connected vs. not, via `WiFi.status() != WL_CONNECTED`
    in a timeout loop -- it doesn't log or branch on *which* status came
    back, so a `NO_AP_FOUND` occurrence can't yet be told apart from a wrong
@@ -500,8 +497,9 @@ Grove PORT.A (HY2.0-4P): `G4`, `G5`, power direction via PM1 `BOOST5V_EN_PP`.
   out first and reporting a generic timeout instead of the device's real
   error.
 
-- A host-side SDL renderer (see "Next steps") is feasible but not yet
-  built. M5GFX 0.2.28 vendors LovyanGFX's SDL backend
+- A host-side SDL renderer was feasible but not yet built, as of
+  2026-09-13 (see the follow-up entry below for the finished version).
+  M5GFX 0.2.28 vendors LovyanGFX's SDL backend
   (`lgfx/v1/platforms/sdl/`) -- it compiles to an empty translation unit on
   the ESP32 target (the whole file is gated behind `#if defined(SDL_h_)`),
   so seeing it in the build log does not mean SDL is active. Backend
@@ -519,6 +517,95 @@ Grove PORT.A (HY2.0-4P): `G4`, `G5`, power direction via PM1 `BOOST5V_EN_PP`.
   Toolchain prerequisites are **not installed on this machine** as of
   2026-09-13: no MSYS2, no gcc/g++ on PATH, no SDL2 dev files, PlatformIO
   `native` platform not installed. Confirmed by reading source, 2026-09-13.
+
+- **The SDL host build is done and working, 2026-09-16** (`src/sdl_main.cpp`,
+  `[env:native]` in `platformio.ini`). Toolchain: MSYS2 installed via
+  `winget install -e --id MSYS2.MSYS2`, then `pacman -S
+  mingw-w64-x86_64-gcc mingw-w64-x86_64-SDL2 mingw-w64-x86_64-make` for the
+  GCC/SDL2 dev files, plus `pio pkg install -g -p native`. `C:\msys64\
+  mingw64\bin` was added to the user `PATH` permanently, so new shells pick
+  up `gcc`/`SDL2.dll` without extra setup -- a shell already running before
+  that change won't see it until restarted. Three real bugs surfaced
+  getting it to actually render, none of them in `render.cpp` itself:
+  - mingw-w64 hides `localtime_r()` (used in `render.cpp`) behind
+    `_POSIX_THREAD_SAFE_FUNCTIONS`, and unlike glibc this isn't implied by
+    `-std=gnu++14` alone -- needs `-D_POSIX_THREAD_SAFE_FUNCTIONS`
+    explicitly (plain `-std=c++14`, i.e. strict ANSI, hides it too, for a
+    different reason). Both confirmed by build failure
+    (`'localtime_r' was not declared`) before adding the fixes.
+  - `src/sdl_main.cpp` needs its own `build_src_filter` exclusion
+    (`-<sdl_main.cpp>`) on the two ESP32 envs -- without it, PlatformIO's
+    default source filter compiles it there too (it defines its own
+    `main()`/`setup()`/`loop()`, which would collide with `main.cpp`'s).
+    The file's own `#if !defined(SDL_h_) #error ...` guard does catch the
+    mismatch and fails the build, but GCC keeps parsing past `#error`
+    rather than stopping immediately, so the failing build's log is
+    dominated by confusing secondary errors (`'lgfx::Panel_sdl' has not
+    been declared`) instead of just the one real one -- exclude the file
+    per-env, don't rely on the guard alone.
+  - **The actual blank-window bug**: M5GFX's SDL `autodetect()`
+    (`M5GFX.cpp`) sets `board_M5PaperColor`'s rotation to `r=1` in its
+    board table, which swaps `gfx.width()`/`gfx.height()` to 600x400 even
+    though the window itself is still the physical 400x600 -- confirmed by
+    logging both and seeing exactly that swap. `render.cpp`'s
+    `SCREEN_W`/`SCREEN_H` (400x600, from `layout.h`) aren't rotation-aware,
+    so `canvas.pushSprite(0, 0)` was blitting a 400-wide/600-tall sprite
+    onto a parent that thought it was 600 wide -- the geometry didn't fit,
+    and the window stayed on its blank initial framebuffer. Neither
+    `pushSprite()` nor `createPalette()` (both are called, in the right
+    order, matching `drawAll()` in `main.cpp`) were actually missing --
+    this cost nothing at the render-logic level, it was purely a host-only
+    orientation mismatch. Fixed with an explicit `gfx.setRotation(0);`
+    right after `gfx.init()` in `sdl_main.cpp`, overriding the SDL board
+    table's guess rather than trusting it. This is a host-preview-only fix
+    -- it says nothing about rotation on real hardware, which was never in
+    question (confirmed pixel-identical via `hil.py` well before this).
+  Confirmed live: `pio run -e native -t upload` renders
+  `test/fixtures/example.json` correctly in a live window.
+
+- **The SDL host build's output is byte-for-byte identical to the real
+  device's**, not just visually similar -- confirmed 2026-09-16, closing
+  the loop this whole effort was for. Set `SDL_PREVIEW_DUMP_RAW=<path>` and
+  `sdl_main.cpp` writes the raw `canvas.getBuffer()`/`bufferLength()` bytes
+  (the exact same palette_4bit buffer `main.cpp`'s `tier1HandleRender()`
+  base64-encodes over serial for the real device) to that path and exits
+  immediately, skipping the SDL window entirely -- no need to babysit a GUI
+  for a scripted check. `tools/hil.py`'s new `decode-raw` subcommand
+  decodes that file with the exact same `decode_palette4()` function
+  already used for the device's serial dump (not a second
+  reimplementation) and, given `--golden`, compares it byte-for-byte the
+  same way `test`/`test --all` do:
+  ```
+  SDL_PREVIEW_DUMP_RAW=raw.bin pio run -e native -t upload
+  python tools/hil.py decode-raw raw.bin --golden test/golden/example.png
+  ```
+  First run surfaced two real, unrelated bugs in `sdl_main.cpp` -- neither
+  in `render.cpp`, both in the small amount of host-only glue code around
+  it, confirmed by the mismatch's `diff.png` showing changes isolated to
+  text, not layout/graphics:
+  - `parseSnapshot()`'s `stationLabel` fallback was `"STATION"`; the real
+    firmware's `tier1ParseSnapshot()` (which this mirrors) falls back to
+    `STATION_LABEL` (`config.h`, `"GOLDEN GATE"`) for fixtures that predate
+    that field -- every fixture under `test/fixtures/` does. Fixed by
+    hardcoding `"GOLDEN GATE"` directly (this file intentionally doesn't
+    include `config.h`, to stay decoupled from real Wi-Fi credentials).
+  - **Every timestamp was exactly 7 hours off.** `TIER1_TEST` (the ESP32
+    path the goldens were captured against) never calls
+    `configTzTime()`/`setenv()` -- no Wi-Fi/NTP path exists there at all --
+    so `render.cpp`'s `localtime_r()` calls run under ESP-IDF's
+    unconfigured default, UTC. This host build's C runtime instead
+    defaulted to this dev machine's own OS timezone (Pacific), which is
+    exactly what produced the 7-hour gap. Fixed by forcing UTC explicitly
+    at the top of `setup()` -- `_putenv("TZ=UTC0"); _tzset();` on Windows/
+    mingw, since it doesn't declare POSIX `setenv()` by default;
+    `setenv()`/`tzset()` on other platforms. Deliberately **not** the same
+    as production (`main.cpp` sets `TZ_STRING`, Pacific, once NTP
+    succeeds) -- this specifically matches `TIER1_TEST`'s unconfigured
+    state, since that's what `test/golden/*.png` reflects.
+  After both fixes: `decode-raw --golden test/golden/example.png` reports
+  `MATCH`, exit 0, confirming the SDL host path and the real device path
+  produce identical output for the same input -- not close, not visually
+  similar, the same bytes.
 
 - `src/render.h`/`src/render.cpp` (the render-module extraction, 2026-09-13)
   don't include `Arduino.h` themselves, but on the **ESP32 build** it's
@@ -697,10 +784,11 @@ document in PSRAM and use a filter — don't parse the whole body on the stack.
 ## Build and flash
 
 ```bash
-pio run                       # build
+pio run                       # build (just the two ESP32 envs -- see [platformio] default_envs)
 pio run -t upload             # flash (see button note below -- usually not needed)
 pio device monitor -b 115200  # serial log
-python tools/preview.py       # regenerate the layout preview PNG
+python tools/preview.py       # regenerate the layout preview PNG (PIL, not the real M5GFX draw path)
+pio run -e native -t upload   # host-side SDL preview -- real render path, see Verified corrections
 ```
 
 You (Claude) can and should run these directly. Read the compiler output and
@@ -820,8 +908,10 @@ occasionally: it's closer to a fast unit test than a hardware step.
 ```
 src/config.h              Wi-Fi creds, station IDs, coordinates, cadence
 src/main.cpp              wake -> connect -> fetch -> draw -> sleep
+src/render.h/.cpp         drawHeader()/drawNowStrip()/... -- shared by main.cpp and sdl_main.cpp
+src/sdl_main.cpp          [env:native] host entry point -- see Verified corrections
 src/layout.h              GENERATED from layout.json -- do not edit by hand
-tools/preview.py          host-side layout renderer, palette-accurate
+tools/preview.py          host-side layout renderer, palette-accurate (PIL, not the real M5GFX draw path)
 tools/gen_layout_header.py  layout.json -> src/layout.h, run automatically by `pio run`
 layout.json               shared pixel-geometry source of truth for both of the above
 refs/                     vendored upstream sources, read-only reference

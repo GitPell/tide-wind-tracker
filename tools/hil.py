@@ -858,6 +858,57 @@ def cmd_test(args):
     sys.exit(EXIT_MISMATCH)
 
 
+def cmd_decode_raw(args):
+    """Decodes a raw palette_4bit buffer dumped straight to a file (e.g. by
+    src/sdl_main.cpp's SDL_PREVIEW_DUMP_RAW, or a raw dump saved by hand from
+    a device transfer) using the exact same decode_palette4() this module
+    uses for the real device's serial dump -- no device connection involved,
+    so none of the top-level --port/--timeout/--connect-timeout options
+    apply here. This is what makes an SDL-host render and a real-device
+    render comparable byte-for-byte: both paths funnel through this one
+    decode function, not two independent reimplementations of the palette
+    unpacking."""
+    raw = Path(args.raw_file).read_bytes()
+    try:
+        actual = decode_palette4(raw, SCREEN_W, SCREEN_H)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(EXIT_DEVICE_ERROR)
+
+    if args.out:
+        actual.save(args.out)
+        print(f"wrote {args.out}")
+
+    if not args.golden:
+        return 0
+
+    golden_path = Path(args.golden)
+    if not golden_path.exists():
+        print(f"error: golden image not found: {golden_path}", file=sys.stderr)
+        sys.exit(EXIT_DEVICE_ERROR)
+    expected = Image.open(golden_path)
+
+    if images_equal(expected, actual):
+        print(f"MATCH: {args.raw_file} matches {args.golden}")
+        return 0
+
+    out_dir = Path(args.out_dir) if args.out_dir else Path(".")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    expected_path = out_dir / "expected.png"
+    actual_path = out_dir / "actual.png"
+    diff_path = out_dir / "diff.png"
+
+    expected.convert("RGB").save(expected_path)
+    actual.save(actual_path)
+    make_diff_image(expected, actual).save(diff_path)
+
+    print(f"MISMATCH: {args.raw_file} does not match {args.golden}", file=sys.stderr)
+    print(f"  expected: {expected_path}", file=sys.stderr)
+    print(f"  actual:   {actual_path}", file=sys.stderr)
+    print(f"  diff:     {diff_path}", file=sys.stderr)
+    sys.exit(EXIT_MISMATCH)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--port", help="Serial port to use instead of auto-detecting by USB VID/PID")
@@ -903,6 +954,20 @@ def main():
              "other (default: cwd)",
     )
     p_test.set_defaults(func=cmd_test)
+
+    p_decode_raw = sub.add_parser(
+        "decode-raw",
+        help="Decode a raw palette_4bit buffer dumped to a file (no device involved) and optionally "
+             "compare it against a golden PNG -- for the SDL host build's SDL_PREVIEW_DUMP_RAW output",
+    )
+    p_decode_raw.add_argument("raw_file", help="Path to a raw palette_4bit dump (e.g. from SDL_PREVIEW_DUMP_RAW)")
+    p_decode_raw.add_argument("--out", help="Also save the decoded image as a PNG at this path")
+    p_decode_raw.add_argument("--golden", help="Path to a golden PNG to compare against")
+    p_decode_raw.add_argument(
+        "--out-dir", default=None,
+        help="Directory to write expected/actual/diff PNGs on mismatch (default: cwd)",
+    )
+    p_decode_raw.set_defaults(func=cmd_decode_raw)
 
     args = parser.parse_args()
     sys.exit(args.func(args) or 0)
