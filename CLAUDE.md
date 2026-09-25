@@ -96,7 +96,14 @@ The project's finish line is defined in DONE.md. Read it before planning work, a
     and **confirmed on real hardware, 2026-09-16**: a fresh soak segment
     (cycle 385, 14:32:48 -> cycle 397, 20:22:38, same day) ran at ~29.2
     min/cycle -- in line with the ~31.3 min expected baseline (~78s awake +
-    30 min) and nowhere near the old ~89.3, confirming the fix. The
+    30 min) and nowhere near the old ~89.3, confirming the fix.
+    **Caveat (2026-09-24):** that ~29.2 figure is inconsistent with the
+    RX8130 wake alarm, which has minute resolution (no seconds field --
+    `RX8130_Class.cpp` `setAlarmIRQ()`). With the alarm set 30 min after
+    each cycle ends, a ~78-93s awake time should give periods of at least
+    31 min, never under 30. Unexplained and not investigated. The fix is
+    confirmed instead by soak 2's full-run average, 31.7 min/cycle over
+    375 cycles (below), which does fit. The
     100%->98% figure from the *original* (pre-fix) soak still shouldn't be
     used for a days-per-charge estimate (see "Design constraints"), but the
     cycles-per-day term itself is no longer in question.
@@ -119,7 +126,10 @@ The project's finish line is defined in DONE.md. Read it before planning work, a
   the final days-per-charge figure. The run-to-empty measures `237ef2f`
   firmware, which fetches current wind from Open-Meteo only -- the
   observed-wind change below is not in it and adds awake time, so the
-  measured figure is for the pre-observed-wind firmware.
+  measured figure is for the pre-observed-wind firmware. `237ef2f` also
+  still has the ~15.5s USB serial wait on every battery wake (see the
+  serial-wait entry below), so its awake time on battery is ~93s, not the
+  ~78s measured with USB attached.
 
 **Not yet exercised:**
 - Observed wind (implemented and built with `pio run`, **not yet
@@ -133,6 +143,17 @@ The project's finish line is defined in DONE.md. Read it before planning work, a
   on a 5s timeout. Same change: `httpGetJson()` takes a per-call timeout
   and now also applies it to the TLS handshake, which previously kept
   WiFiClientSecure's 120s default.
+- Skipping the USB serial wait on battery (implemented and built with
+  `pio run`, **not yet flashed**). `setup()`'s `while (!Serial && ... <
+  15000)` wait ran the full 15s (plus a 500ms delay) on every battery
+  wake. `Serial` is `HWCDC` here (`ARDUINO_USB_MODE=1`), and `!Serial`
+  stays true without a host: `isPlugged()` goes false within ~5ms of the
+  last USB start-of-frame packet, and a host is the only thing that sends
+  them. Confirmed by reading the framework's `HWCDC.cpp`, not measured on
+  hardware. The wait now runs only when `Serial.isPlugged()` is true, so
+  behavior with a host attached (the monitor and `hil.py` workflow) is
+  unchanged. `Serial` writes and `flush()` don't block without a host
+  (they drop data), so the rest of the logging costs nothing on battery.
 - Current draw. The 92.53uA standby and ~150mA average-awake figures are
   still datasheet/arithmetic estimates, not measurements on this board --
   see "Design constraints" below and the `M5.begin()` entry in "Verified
@@ -157,6 +178,25 @@ DONE.md is the authoritative scope. This section is the working to-do list towar
    in a timeout loop -- it doesn't log or branch on *which* status came
    back, so a `NO_AP_FOUND` occurrence can't yet be told apart from a wrong
    password, a timeout, or the AP being out of range.
+
+**After the run-to-empty ends** (everything waiting on hardware; do none of
+it before then, except the baseline timing, which only needs watching):
+- [ ] Baseline timing on `237ef2f`, on battery -- can be done now without
+      touching the device. The wake alarm fires on a whole minute (the
+      RX8130 alarm has no seconds field), 30-31 min after the footer's
+      `UPD HH:MM`. Time from that minute to the visible start of the panel
+      refresh, over 2-3 wakes.
+- [ ] Record the run-to-empty result (Next steps #1).
+- [ ] Flash the current firmware (`pio run -t upload --upload-port COMx`).
+      The battery charges over USB meanwhile.
+- [ ] With the monitor attached from boot: the log starts at the first
+      line as before (the serial wait still runs with a host), and the
+      first few `WINDSRC` lines show `src=obs`.
+- [ ] Flash `m5stack-papercolor-test`, run `python tools/hil.py test
+      --all` (expect 5/5 PASS), then flash `m5stack-papercolor` back.
+- [ ] Unplugged, on battery: repeat the baseline timing. Expect the panel
+      refresh to start ~14s earlier (~15.5s serial wait removed, minus the
+      estimated 1-2s the observed-wind request adds).
 
 ---
 
@@ -729,7 +769,9 @@ Grove PORT.A (HY2.0-4P): `G4`, `G5`, power direction via PM1 `BOOST5V_EN_PP`.
   found nothing there either. Fixed in source, commit `237ef2f`, and
   **confirmed on real hardware, 2026-09-16**: a fresh soak segment (cycle
   385 -> cycle 397, same day) ran at ~29.2 min/cycle against the ~31.3 min
-  expected baseline -- see "Current state" for the full readout.
+  expected baseline -- see "Current state" for the full readout, including
+  why that 29.2 figure is itself unexplained and the soak 2 average (31.7
+  min/cycle over 375 cycles) is the figure that confirms the fix.
 
 ---
 
@@ -771,8 +813,10 @@ Grove PORT.A (HY2.0-4P): `G4`, `G5`, power direction via PM1 `BOOST5V_EN_PP`.
   breakdown, assuming the 54% used was 54% of the rated 1250mAh: ~675mAh
   over 8.24 days = ~82mAh/day, ~1.8mAh/cycle; the datasheet standby
   (~2.2mAh/day) is under 3% of that, so ~97% of daily energy is awake
-  time -- ~1.75mAh per ~78s awake window, i.e. ~80mA average awake,
-  below the ~150mA assumed above. Treat all of this as an estimate until
+  time -- ~1.75mAh per ~93s awake window on battery (the ~78s measured
+  with USB attached, plus the ~15.5s serial wait `237ef2f` runs on every
+  battery wake -- see "Current state"), i.e. ~67mA average awake, below
+  the ~150mA assumed above. Treat all of this as an estimate until
   the run-to-empty (in progress, ~2026-10-01) replaces it with a measured
   days-per-charge figure.
 

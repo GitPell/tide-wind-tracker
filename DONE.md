@@ -8,7 +8,7 @@ This file defines when the project is finished. Anything not listed here is out 
 
 ## 1. Runs unattended
 
-- [x] Wake cadence verified on hardware: 29.2 min observed after the `tm_isdst` fix (see CLAUDE.md, notes/soak-2026-09-11.md)
+- [x] Wake cadence verified on hardware: 31.7 min/cycle average over 375 cycles (soak 2, 2026-09-16 to 2026-09-24) after the `tm_isdst` fix (see CLAUDE.md, notes/soak-2026-09-11.md)
 - [x] No hang on failure: every wait is bounded (Wi-Fi 20s, time sync 10s, fixed hilo retries; per HTTP request: DNS ~14s, TCP connect 5s, TLS handshake 120s on `237ef2f` (the measured firmware) and 15s after the observed-wind change (5s for the wind request), 15s between received bytes) and setup always reaches `drawAll()` and `sleepUntilNext()` (audit 2026-09-24)
 - [ ] A battery wake does not wait for a USB serial connection (verify `main.cpp` serial wait behavior without USB; fix if it waits)
 - [ ] Wi-Fi failures are diagnosable: `connectWifi()` logs the status code, disconnect reason, and visible networks on failure; the cause of `NO_AP_FOUND` is identified or documented

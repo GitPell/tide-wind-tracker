@@ -687,9 +687,18 @@ void setup() {
   // artifact of TIER1_TEST specifically.
   uint32_t beginMs = millis() - beginStart;
   Serial.begin(115200);
-  uint32_t serialWaitStart = millis();
-  while (!Serial && millis() - serialWaitStart < 15000) delay(10);
-  delay(500);
+  // Wait for a terminal only when a USB host is actually present.
+  // isPlugged() tracks USB start-of-frame packets, which a host sends every
+  // 1ms; HWCDC.cpp's tick hook marks the port unplugged after ~5ms without
+  // one. On battery there is no host, so `!Serial` stays true and this loop
+  // used to sit out the full 15s on every wake. With a host attached,
+  // behavior is unchanged. (TIER1_TEST's own wait above always runs with a
+  // host, so it's left as is.)
+  if (Serial.isPlugged()) {
+    uint32_t serialWaitStart = millis();
+    while (!Serial && millis() - serialWaitStart < 15000) delay(10);
+    delay(500);
+  }
   Serial.printf("M5.begin() took %lu ms\n", (unsigned long)beginMs);
 
   // Confirmed against refs/M5PaperColor-UserDemo/main/hal/hal.cpp Hal::init():
