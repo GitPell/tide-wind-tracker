@@ -21,7 +21,7 @@ This file defines when the project is finished. Anything not listed here is out 
 - [ ] `src/config.example.h` committed (exists); the README gives the step to copy it to `src/config.h` and which values to fill in
 - [ ] 2.4 GHz Wi-Fi requirement documented (the ESP32-S3 has no 5 GHz radio)
 - [x] DejaVu fonts vendored in `tools/fonts/` with their license file (`9ead3ff`)
-- [ ] Library versions pinned in `platformio.ini` (M5Unified, M5GFX, M5PM1) to the versions currently in use
+- [x] Library versions pinned in `platformio.ini` (M5Unified, M5GFX, M5PM1) to the versions currently in use (`81f0813`)
 - [ ] Firmware builds from a fresh clone following only the README steps
 - [ ] SDL host build documented in the README, including the MSYS2 install-path assumption, and builds from a fresh clone
 
