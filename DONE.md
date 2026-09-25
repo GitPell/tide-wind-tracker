@@ -34,7 +34,7 @@ This file defines when the project is finished. Anything not listed here is out 
 ## 4. Ready to publish (if chosen later)
 
 - [x] Git history scanned for credentials: `src/config.h` never tracked; only placeholder Wi-Fi values committed; NOAA and Open-Meteo need no API keys (audit 2026-09-24)
-- [ ] LICENSE file added
+- [x] LICENSE file added (`2602686`)
 - [ ] Commit author emails (all noreply, verified) and station/location choice confirmed intentional by Chris
 
 ## 5. Documented
