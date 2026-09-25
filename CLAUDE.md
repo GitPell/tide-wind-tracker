@@ -1033,6 +1033,64 @@ the serial log yourself rather than asking the user to paste them.
 
 ---
 
+## Pinned versions
+
+Every build dependency is pinned in `platformio.ini`, to exactly what was
+installed on 2026-09-25 -- the versions every hardware result in this file
+was measured on. **Upgrading any of them means re-running `python
+tools/hil.py test --all` on the device** before trusting the build (and, if
+M5GFX changes, re-checking the SDL renders with `hil.py decode-raw
+--golden`).
+
+| Dependency | Pinned to | Envs |
+|---|---|---|
+| espressif32 platform | 6.12.0 | both ESP32 |
+| framework-arduinoespressif32 | 3.20017.241212+sha.dcc1105b (Arduino-ESP32 2.0.17) | both ESP32 |
+| tool-esptoolpy (builds `firmware.bin` from the ELF) | 2.40900.250804 | both ESP32 |
+| toolchain-xtensa-esp32s3 | 8.4.0+2021r2-patch5 (already exact in the platform's `platform.json`) | both ESP32 |
+| M5GFX | git `d91077b9a607b59404e4e4a49f775c792bfae382` (0.2.28) | all three |
+| M5Unified | git `8530f5377d782e4a25a6c482de2e71c3f75ca8eb` (0.2.21) | both ESP32 |
+| M5PM1 | git `be9a5456c007c333e7ac963f33bfde1ffa5d82ee` (1.0.7) | both ESP32 |
+| ArduinoJson | 7.4.3 | all three |
+| native platform | 1.2.1 | native |
+
+Not pinnable from `platformio.ini`: the native env's compiler is MSYS2's own
+GCC (16.2.0 on 2026-09-25), which PlatformIO doesn't manage.
+
+- **Keep M5GFX listed before M5Unified in `lib_deps`.** M5Unified's
+  `library.json` depends on `M5GFX >=0.2.28`. If that is resolved first,
+  PlatformIO downloads the newest registry M5GFX (0.2.30 on 2026-09-25)
+  instead of the pinned commit. Confirmed with a fresh install: listed
+  first, only the four pinned libraries were installed.
+- **Native M5GFX was aligned to the device's commit.** Before pinning, the
+  native env had resolved M5GFX 0.2.29 (`641944b`), newer than the device's
+  0.2.28 (`d91077b`). On `d91077b` it builds with 0 warnings, all five
+  original fixtures still `MATCH` their device goldens, and all five
+  failure fixtures render byte-identical to their earlier `641944b`
+  renders (2026-09-25).
+- **Pinning changed no code or data (verified 2026-09-25).** Clean builds
+  are deterministic, and pinned vs. unpinned `firmware.bin` differ only in
+  embedded M5GFX source paths, `app_elf_sha256`, and the image trailer --
+  full analysis in the pinning commit's message. Consequence: `firmware.bin`
+  hashes can change when only a libdeps folder name changes, with
+  identical code.
+- **Two traps hit during that verification:**
+  - The VS Code PlatformIO extension installs the default env's `lib_deps`
+    from the repo's `platformio.ini` whenever `.pio/libdeps` changes, even
+    with `platformio-ide.autoRebuildAutocompleteIndex` off. That can race
+    a concurrent build (duplicate installs, then `opening dependency file
+    ... .d: No such file or directory`), and it quietly installed the then
+    unpinned, newer library commits alongside the pinned ones. Don't
+    validate an alternate config (`pio run -c ...`) while VS Code has the
+    project open without checking `integrity.dat` and the dependency graph
+    afterwards.
+  - `pio run -v` fails at the `firmware.bin` step with a SCons `TypeError`
+    while *printing* the command line (tool-scons 4.11.1, `Action.py
+    print_cmd_line`). Build without `-v`. A `-v` run with nothing left to
+    build still prints the dependency graph with paths.
+
+---
+
 ## Test harness (Tier 1 / hil.py)
 
 ```bash
