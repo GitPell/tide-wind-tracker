@@ -5,6 +5,11 @@ coastal location. Wakes on a timer, fetches data over Wi-Fi, redraws, sleeps.
 
 ---
 
+## Project status
+The project's finish line is defined in DONE.md. Read it before planning work, and treat anything not listed there as out of scope.
+
+---
+
 ## Current state (as of 2026-09-14)
 
 **Works, confirmed on real hardware:**
@@ -91,6 +96,7 @@ coastal location. Wakes on a timer, fetches data over Wi-Fi, redraws, sleeps.
   now that real multi-day drain is known to be month-shaped.
 
 **Next steps:**
+DONE.md is the authoritative scope. This section is the working to-do list toward it; anything here that doesn't serve a DONE.md criterion is out of scope.
 1. Re-derive the battery budget from an actual current measurement, not
    arithmetic on a corrected time -- see "Design constraints" and the
    `M5.begin()` entry in "Verified corrections". Measured awake time
