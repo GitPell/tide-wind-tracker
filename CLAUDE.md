@@ -64,12 +64,27 @@ The project's finish line is defined in DONE.md. Read it before planning work, a
   there (a rotation mismatch, a timezone mismatch, and a wrong fallback
   station label -- none in `render.cpp` itself) -- see "Verified
   corrections".
-- The battery soak test completed: started cycle 289 on 2026-09-11 at 15:11
-  at 100% battery, ended cycle 334 on 2026-09-14 at 10:08 at 98% -- 45
-  cycles over 66h57m. Two findings:
-  - Battery drain is **month-shaped, not week-shaped** at this rate, so the
-    ~50s `M5.begin()` cost (see "Verified corrections") is not the problem
-    it looked like when only the time budget was known.
+- **A run-to-empty battery test is in progress -- do not interrupt it.**
+  Started 2026-09-16 (cycle 385, 100%), expected to end around 2026-10-01.
+  Until it does: no flashing, no USB connection (USB charges the battery
+  and invalidates the measurement), so no `pio run -t upload`, no
+  `pio device monitor`, no `tools/hil.py`. Firmware and render changes can
+  still be written, built with plain `pio run`, and checked with the SDL
+  build (`pio run -e native`), then flashed together afterwards. See the
+  sequencing rule in DONE.md.
+- Battery soak 1 (pre-`tm_isdst`-fix firmware): started cycle 289 on
+  2026-09-11 at 15:11 at 100% battery, ended cycle 334 on 2026-09-14 at
+  10:08 at 98% -- 45 cycles over 66h57m. Two findings:
+  - **Corrected 2026-09-24:** this soak's 100%->98% was originally read as
+    "battery drain is month-shaped, not week-shaped", and taken to mean the
+    ~50s `M5.begin()` cost wasn't a real battery problem. Soak 2 (below)
+    overturns that: it drained ~3.3x faster *per cycle* (0.144%/cycle vs
+    0.044%/cycle here), so the slower pre-fix cadence doesn't explain the
+    gap. The cause is unconfirmed: the battery gauge may be nonlinear near
+    full charge (e.g. voltage-based, or pinned at 100% above some
+    threshold), which would make a short run starting at 100% under-report
+    its drain.
+    Don't use soak 1's figures for any battery-life estimate.
   - The observed interval was **89.3 minutes/cycle against a configured
     `UPDATE_MINUTES=30`** (`src/config.h`). Root-caused 2026-09-16: not a
     multiplicative bug (a follow-up rerun at `UPDATE_MINUTES=2` added the
@@ -85,29 +100,44 @@ The project's finish line is defined in DONE.md. Read it before planning work, a
     100%->98% figure from the *original* (pre-fix) soak still shouldn't be
     used for a days-per-charge estimate (see "Design constraints"), but the
     cycles-per-day term itself is no longer in question.
+- Battery soak 2 (post-fix firmware: the `tm_isdst` fix committed as
+  `237ef2f`; no ESP32 firmware source has changed since): cycle 385 on
+  2026-09-16 at 14:32 at 100% -> cycle 760 on 2026-09-24 at 20:23 at 46%
+  -- 375 cycles over 197h51m (**8.24 days**), **31.7 min/cycle** (~45.5
+  cycles/day, matching the ~31.3 min expected baseline across the whole
+  run, not just its first 12 cycles). Drain: 54 points in 8.24 days =
+  **~6.55%/day, 0.144%/cycle**, a linear projection of **~15 days per
+  charge -- about half the ~1 month design goal.** Raw readings in
+  `notes/soak-2026-09-11.md`. **Gauge caveat:** the projection assumes
+  `M5.Power.getBatteryLevel()` is linear in remaining capacity, which is
+  unverified (how the gauge works is unconfirmed), and the device may stop
+  completing cycles before the gauge reads 0% -- so ~15 days is an
+  estimate, not a measurement. This soak is continuing as the
+  run-to-empty (above), which produces the measured figure. The
+  2026-09-24 reading was taken with USB attached for the serial monitor,
+  for about 2 minutes (unplugged since); any charge that added inflates
+  the final days-per-charge figure.
 
 **Not yet exercised:**
-- Current draw (battery life itself is now soak-tested, see above). The
-  92.53uA standby and ~150mA average-awake figures are still datasheet/
-  arithmetic estimates, not measurements on this board -- see "Design
-  constraints" below and the `M5.begin()` entry in "Verified corrections".
-  Real measured awake time is ~78s/cycle against an original ~20s
-  assumption, but per the soak result above, that gap looks less alarming
-  now that real multi-day drain is known to be month-shaped.
+- Current draw. The 92.53uA standby and ~150mA average-awake figures are
+  still datasheet/arithmetic estimates, not measurements on this board --
+  see "Design constraints" below and the `M5.begin()` entry in "Verified
+  corrections". Real measured awake time is ~78s/cycle against an original
+  ~20s assumption, and per soak 2 above that gap does matter: projected
+  battery life is ~15 days, not ~1 month. The run-to-empty measures
+  days-per-charge directly, so a current measurement is now only needed to
+  attribute energy across `M5.begin()`, Wi-Fi, and the panel refresh.
 
 **Next steps:**
 DONE.md is the authoritative scope. This section is the working to-do list toward it; anything here that doesn't serve a DONE.md criterion is out of scope.
-1. Re-derive the battery budget from an actual current measurement, not
-   arithmetic on a corrected time -- see "Design constraints" and the
-   `M5.begin()` entry in "Verified corrections". Measured awake time
-   (~78s/cycle) is ~4x the original ~20s assumption, but the mA figures
-   (~150mA average awake, 92.53uA standby) were never measured either, and
-   awake current likely doesn't scale linearly across such different
-   phases (a mostly memory/I2C-bound `M5.begin()`, Wi-Fi TX, and an actual
-   panel refresh probably don't draw the same). The cycles-per-day term is
-   no longer blocked (the `tm_isdst` fix is confirmed -- see "Current
-   state"), but a days-per-charge figure still needs the mA measurement
-   this item is about before it means anything.
+1. Let the run-to-empty finish (~2026-10-01, see "Current state"; do not
+   interrupt it). "Empty" = the device no longer completes a wake cycle.
+   Record the last completed cycle's time -- the frozen frame's footer
+   (`UPD HH:MM`) shows it, so check the panel daily to pin down the date --
+   and its cycle number (estimate from elapsed time at ~31.7 min/cycle if
+   it can't be read back). Then enter the measured days-per-charge in
+   "Design constraints", compare it to the ~1 month goal, and document the
+   shortfall, stating the firmware version measured (`237ef2f`).
 2. Wi-Fi `NO_AP_FOUND` still unresolved. `connectWifi()` (`src/main.cpp`)
    only distinguishes connected vs. not, via `WiFi.status() != WL_CONNECTED`
    in a timeout loop -- it doesn't log or branch on *which* status came
@@ -714,19 +744,23 @@ Grove PORT.A (HY2.0-4P): `G4`, `G5`, power direction via PM1 `BOOST5V_EN_PP`.
   corrected time. Original (now-superseded) arithmetic, kept for reference:
   ~20s awake at ~150mA average = ~0.85mAh per cycle, 48 cycles/day ≈ 41mAh,
   plus ~2.2mAh/day sleeping ≈ 43mAh/day against 1250mAh.
-  A real multi-day soak (2026-09-11 to 2026-09-14, see "Current state") is
-  at least qualitatively month-shaped, not week-shaped (100%->98% over 45
-  cycles / 66h57m) -- but don't treat that as confirming the "48
-  cycles/day" arithmetic above: the soak's observed cadence was 89.3
-  minutes/cycle against the configured `UPDATE_MINUTES=30`. Root-caused and
-  fixed 2026-09-16 -- a `tm_isdst` bug (~58-60 min of additive excess sleep
-  every cycle, not a multiplicative one), confirmed resolved on real
-  hardware (~29.2 min/cycle post-fix, see "Verified corrections" and
-  "Current state"). The cycles-per-day term of the arithmetic above is
-  therefore no longer in question (~29-31 min/cycle implies ~46-48
-  cycles/day, close to the original 48/day assumption) -- but a
-  days-per-charge number still isn't computable, because the mA figures
-  themselves were never measured (see "Next steps").
+  Soak 1 (2026-09-11 to 2026-09-14, 100%->98% over 45 cycles / 66h57m)
+  was originally read as "month-shaped, not week-shaped" -- **that
+  conclusion is withdrawn**; soak 2 overturned it (see "Current state").
+  Its 89.3 min/cycle cadence was a `tm_isdst` bug, root-caused and fixed
+  2026-09-16 (see "Verified corrections"); soak 2 then ran at 31.7
+  min/cycle (~45.5 cycles/day, close to the original 48/day assumption),
+  so the cycles-per-day term is no longer in question.
+  **Current best estimate (soak 2, 2026-09-16 to 2026-09-24): ~15 days per
+  charge**, a linear projection from 100%->46% over 8.24 days / 375
+  cycles -- about half the one-month goal. Rough, gauge-dependent
+  breakdown, assuming the 54% used was 54% of the rated 1250mAh: ~675mAh
+  over 8.24 days = ~82mAh/day, ~1.8mAh/cycle; the datasheet standby
+  (~2.2mAh/day) is under 3% of that, so ~97% of daily energy is awake
+  time -- ~1.75mAh per ~78s awake window, i.e. ~80mA average awake,
+  below the ~150mA assumed above. Treat all of this as an estimate until
+  the run-to-empty (in progress, ~2026-10-01) replaces it with a measured
+  days-per-charge figure.
 
 ---
 
