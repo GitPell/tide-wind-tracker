@@ -616,14 +616,75 @@ void loop() {}   // never reached; setup() never returns
 
 #else
 // ------------------------------------------------------------------- main ---
+// Last STA disconnect reason this cycle (0 = none yet), recorded by the
+// event handler connectWifi() registers. The Wi-Fi event task writes it.
+static volatile uint8_t s_lastDisconnectReason = 0;
+
+static const char* wifiStatusName(wl_status_t st) {
+  switch (st) {
+    case WL_NO_SHIELD:       return "WL_NO_SHIELD";
+    case WL_IDLE_STATUS:     return "WL_IDLE_STATUS";
+    case WL_NO_SSID_AVAIL:   return "WL_NO_SSID_AVAIL";
+    case WL_SCAN_COMPLETED:  return "WL_SCAN_COMPLETED";
+    case WL_CONNECTED:       return "WL_CONNECTED";
+    case WL_CONNECT_FAILED:  return "WL_CONNECT_FAILED";
+    case WL_CONNECTION_LOST: return "WL_CONNECTION_LOST";
+    case WL_DISCONNECTED:    return "WL_DISCONNECTED";
+  }
+  return "UNKNOWN";
+}
+
+// Failure path only. Grep-able lines like BATLOG/WINDSRC: one WIFIFAIL line
+// (status + last disconnect reason), one WIFISCAN line per visible network,
+// and a WIFISCAN summary. Together they separate the likely causes:
+// NO_AP_FOUND with target_seen=0 (AP off, out of range, or 5 GHz-only --
+// the ESP32-S3 is 2.4 GHz only), AUTH_FAIL / 4WAY_HANDSHAKE_TIMEOUT (wrong
+// password), or reason=0(none) (joined, but no IP from DHCP). The active
+// scan costs ~1.5-4s (up to 300ms per channel; the framework caps its wait
+// at 10s) -- only ever on a cycle that already failed.
+static void logWifiFailure(uint32_t elapsedMs) {
+  wl_status_t st = WiFi.status();
+  uint8_t reason = s_lastDisconnectReason;  // before disconnect() overwrites it
+  Serial.printf("WIFIFAIL status=%s(%d) reason=%u(%s) elapsed_ms=%lu\n",
+                wifiStatusName(st), int(st), reason,
+                reason ? WiFi.disconnectReasonName(wifi_err_reason_t(reason))
+                       : "none",
+                (unsigned long)elapsedMs);
+
+  WiFi.disconnect();  // stop reconnect attempts: a scan can't start mid-connect
+  int16_t n = WiFi.scanNetworks();
+  if (n < 0) {
+    Serial.printf("WIFISCAN failed code=%d\n", n);
+    return;
+  }
+  bool seen = false;
+  for (int i = 0; i < n; i++) {
+    bool target = WiFi.SSID(i) == WIFI_SSID;
+    seen |= target;
+    Serial.printf("WIFISCAN ssid=\"%s\" ch=%ld rssi=%ld target=%d\n",
+                  WiFi.SSID(i).c_str(), (long)WiFi.channel(i),
+                  (long)WiFi.RSSI(i), int(target));
+  }
+  Serial.printf("WIFISCAN done count=%d target_seen=%d\n", n, int(seen));
+  WiFi.scanDelete();
+}
+
 static bool connectWifi() {
+  // Registering the handler is all this adds to the success path; the
+  // WIFIFAIL/WIFISCAN work below runs only after the timeout expires.
+  WiFi.onEvent([](arduino_event_id_t, arduino_event_info_t info) {
+    s_lastDisconnectReason = info.wifi_sta_disconnected.reason;
+  }, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   uint32_t start = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - start < WIFI_TIMEOUT_MS) {
     delay(200);
   }
-  return WiFi.status() == WL_CONNECTED;
+  if (WiFi.status() == WL_CONNECTED) return true;
+  logWifiFailure(millis() - start);
+  return false;
 }
 
 static void sleepUntilNext() {

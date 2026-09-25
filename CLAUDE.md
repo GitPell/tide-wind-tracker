@@ -93,11 +93,10 @@ The project's finish line is defined in DONE.md. Read it before planning work, a
     the wake time under the wrong (standard, not daylight) UTC offset. See
     "Verified corrections" for the full mechanism. Fixed in source
     (`nextTm.tm_isdst = -1;` before the `mktime()` call, commit `237ef2f`)
-    and **confirmed on real hardware, 2026-09-16**: a fresh soak segment
-    (cycle 385, 14:32:48 -> cycle 397, 20:22:38, same day) ran at ~29.2
-    min/cycle -- in line with the ~31.3 min expected baseline (~78s awake +
-    30 min) and nowhere near the old ~89.3, confirming the fix.
-    **Caveat (2026-09-24):** that ~29.2 figure is inconsistent with the
+    and **confirmed on real hardware** by soak 2 (below). An earlier
+    12-cycle segment of the same run (cycle 385, 14:32:48 -> cycle 397,
+    20:22:38, 2026-09-16) ran at ~29.2 min/cycle, nowhere near the old
+    ~89.3. **Caveat (2026-09-24):** that ~29.2 figure is inconsistent with the
     RX8130 wake alarm, which has minute resolution (no seconds field --
     `RX8130_Class.cpp` `setAlarmIRQ()`). With the alarm set 30 min after
     each cycle ends, a ~78-93s awake time should give periods of at least
@@ -154,6 +153,28 @@ The project's finish line is defined in DONE.md. Read it before planning work, a
   behavior with a host attached (the monitor and `hil.py` workflow) is
   unchanged. `Serial` writes and `flush()` don't block without a host
   (they drop data), so the rest of the logging costs nothing on battery.
+- Wi-Fi failure diagnostics (implemented and built with `pio run`, **not
+  yet flashed**). When `connectWifi()` times out, it logs one
+  `WIFIFAIL status=<WL_ name>(<n>) reason=<code>(<name>) elapsed_ms=...`
+  line, then does an active scan and logs one
+  `WIFISCAN ssid="..." ch=.. rssi=.. target=0|1` line per visible network
+  and a `WIFISCAN done count=N target_seen=0|1` summary. The reason comes
+  from an `ARDUINO_EVENT_WIFI_STA_DISCONNECTED` handler and is read before
+  the `WiFi.disconnect()` that the scan needs, since that call fires its
+  own `ASSOC_LEAVE` event. The success path only adds the handler
+  registration. The failure path adds the scan, ~1.5-4s (framework cap
+  10s). The scan lines include neighbors' SSIDs, so check a log before
+  pasting it anywhere public.
+  **Only visible with a USB host attached:** on battery, `Serial` writes
+  are dropped (see the serial-wait entry above), so a real field failure
+  can't be captured this way -- waiting for the first natural failure
+  after flashing isn't practical. To test it, provoke a failure instead:
+  set `WIFI_SSID` in `src/config.h` (gitignored) to a network that doesn't
+  exist, flash, and watch one cycle with the monitor attached. Expect
+  `status=WL_NO_SSID_AVAIL(1) reason=201(NO_AP_FOUND)` and
+  `target_seen=0`. A wrong `WIFI_PASS` should instead give an
+  authentication reason (e.g. `AUTH_FAIL` or `4WAY_HANDSHAKE_TIMEOUT`).
+  Restore `config.h` and reflash afterwards.
 - Current draw. The 92.53uA standby and ~150mA average-awake figures are
   still datasheet/arithmetic estimates, not measurements on this board --
   see "Design constraints" below and the `M5.begin()` entry in "Verified
@@ -173,11 +194,10 @@ DONE.md is the authoritative scope. This section is the working to-do list towar
    it can't be read back). Then enter the measured days-per-charge in
    "Design constraints", compare it to the ~1 month goal, and document the
    shortfall, stating the firmware version measured (`237ef2f`).
-2. Wi-Fi `NO_AP_FOUND` still unresolved. `connectWifi()` (`src/main.cpp`)
-   only distinguishes connected vs. not, via `WiFi.status() != WL_CONNECTED`
-   in a timeout loop -- it doesn't log or branch on *which* status came
-   back, so a `NO_AP_FOUND` occurrence can't yet be told apart from a wrong
-   password, a timeout, or the AP being out of range.
+2. Wi-Fi `NO_AP_FOUND` still unresolved. `connectWifi()` now logs
+   `WIFIFAIL`/`WIFISCAN` diagnostics on failure (see "Not yet exercised"),
+   not yet flashed. Its cause still has to be identified from a real
+   occurrence, or documented as unknown, per DONE.md.
 
 **After the run-to-empty ends** (everything waiting on hardware; do none of
 it before then, except the baseline timing, which only needs watching):
@@ -197,6 +217,10 @@ it before then, except the baseline timing, which only needs watching):
 - [ ] Unplugged, on battery: repeat the baseline timing. Expect the panel
       refresh to start ~14s earlier (~15.5s serial wait removed, minus the
       estimated 1-2s the observed-wind request adds).
+- [ ] Provoke a Wi-Fi failure with a nonexistent `WIFI_SSID` (see the
+      Wi-Fi diagnostics entry in "Not yet exercised"), confirm the
+      `WIFIFAIL`/`WIFISCAN` lines appear as expected, then restore
+      `config.h` and reflash.
 
 ---
 
@@ -767,11 +791,10 @@ Grove PORT.A (HY2.0-4P): `G4`, `G5`, power direction via PM1 `BOOST5V_EN_PP`.
   instance of the bug class. `tools/*.py` never goes through
   `mktime()`/`tm_isdst` (uses naive `datetime.strptime()`), so the sweep
   found nothing there either. Fixed in source, commit `237ef2f`, and
-  **confirmed on real hardware, 2026-09-16**: a fresh soak segment (cycle
-  385 -> cycle 397, same day) ran at ~29.2 min/cycle against the ~31.3 min
-  expected baseline -- see "Current state" for the full readout, including
-  why that 29.2 figure is itself unexplained and the soak 2 average (31.7
-  min/cycle over 375 cycles) is the figure that confirms the fix.
+  **confirmed on real hardware** by soak 2's average of 31.7 min/cycle
+  over 375 cycles (2026-09-16 to 2026-09-24). An earlier 12-cycle segment
+  (cycle 385 -> cycle 397, 2026-09-16) ran at ~29.2 min/cycle, which is
+  itself unexplained -- see "Current state".
 
 ---
 
