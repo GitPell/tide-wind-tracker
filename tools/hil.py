@@ -315,11 +315,11 @@ class Device:
     - Waiting for a response already underway to *continue* (each line of a
       framebuffer dump, once ---FB-BEGIN--- has been seen) instead gives
       every line its own fresh `self.timeout`-second window. A ~400x600
-      framebuffer is ~2100 base64 lines and has been observed taking well
-      over 10s end to end on this board's native USB CDC (see the "Serial
-      speed" note in tools/hil.py's history/CLAUDE.md) -- that's a slow but
-      steady transfer, not a hang, and an absolute deadline shared across
-      the whole dump would misdiagnose it as one. Only a gap of
+      framebuffer is ~2100 base64 lines and normally arrives in ~220-235ms
+      end to end (an earlier "well over 10s" figure was a host-side read
+      bug -- see CLAUDE.md "Verified corrections" -> Tooling). Still, a
+      slow but steady transfer is not a hang, and an absolute deadline
+      shared across the whole dump would misdiagnose one. Only a gap of
       `self.timeout` seconds *between* lines counts as a real stall here.
     """
 
