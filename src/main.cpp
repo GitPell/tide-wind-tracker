@@ -812,13 +812,31 @@ void setup() {
       delay(50);
     }
 
-    struct tm lt;
-    if (getLocalTime(&lt, 1000)) {
-      // The RX8130 alarm in sleepUntilNext() schedules by its own clock, so
-      // keep it synced to NTP every cycle.
-      M5.Rtc.setDateTime(&lt);
+    if (sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED) {
+      struct tm lt;
+      if (getLocalTime(&lt, 1000)) {
+        // The RX8130 alarm in sleepUntilNext() schedules by its own clock, so
+        // keep it synced to NTP every cycle.
+        M5.Rtc.setDateTime(&lt);
+      } else {
+        Serial.println("ntp failed");
+      }
     } else {
-      Serial.println("ntp failed");
+      // No sync this cycle. The system clock is still the RTC seed, which
+      // setSystemTimeFromRtc() builds by reading the RTC's local-time digits
+      // as UTC (RTC_Class.cpp). Under TZ_STRING that seed reads back 7-8h
+      // early, and writing it to the RTC above would corrupt the RTC by the
+      // same amount. So: skip the write-back, stop SNTP so a late sync can't
+      // move the clock mid-cycle, and switch to UTC0 so localtime() shows
+      // the RTC's digits unchanged. NOAA (lst_ldt) and Open-Meteo
+      // (timezone=auto) timestamps are local digits too, so parseLocal()/
+      // parseIso() and s.now all stay in that one frame -- the same frame a
+      // Wi-Fi-failure cycle already uses, since it never sets TZ at all.
+      // Found by reading the code, 2026-09-24; not observed on hardware.
+      sntp_stop();
+      setenv("TZ", "UTC0", 1);
+      tzset();
+      Serial.println("ntp failed: not synced in 10s, using RTC time");
     }
 
     bool tides = fetchTides(s);

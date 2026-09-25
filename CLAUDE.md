@@ -175,6 +175,12 @@ The project's finish line is defined in DONE.md. Read it before planning work, a
   `target_seen=0`. A wrong `WIFI_PASS` should instead give an
   authentication reason (e.g. `AUTH_FAIL` or `4WAY_HANDSHAKE_TIMEOUT`).
   Restore `config.h` and reflash afterwards.
+- Time-sync failure handling (implemented and built with `pio run`, **not
+  yet flashed**; found by reading the code, never observed). When SNTP
+  doesn't finish in 10s, `setup()` no longer writes a 7-8h-early time to
+  the RTC; it runs the cycle on the RTC's own time instead. See the
+  "Found and fixed by reading the code, 2026-09-24" entry in "Verified
+  corrections".
 - Current draw. The 92.53uA standby and ~150mA average-awake figures are
   still datasheet/arithmetic estimates, not measurements on this board --
   see "Design constraints" below and the `M5.begin()` entry in "Verified
@@ -221,6 +227,12 @@ it before then, except the baseline timing, which only needs watching):
       Wi-Fi diagnostics entry in "Not yet exercised"), confirm the
       `WIFIFAIL`/`WIFISCAN` lines appear as expected, then restore
       `config.h` and reflash.
+- [ ] Provoke a time-sync failure: a test build whose `configTzTime()`
+      call points at a nonexistent NTP server, so Wi-Fi still connects
+      but SNTP never completes. Expect the `ntp failed: not synced in 10s,
+      using RTC time` line and a correct header time. On the next normal
+      cycle, the header time must still be correct (the RTC wasn't
+      corrupted). Then restore and reflash.
 
 ---
 
@@ -443,6 +455,37 @@ Grove PORT.A (HY2.0-4P): `G4`, `G5`, power direction via PM1 `BOOST5V_EN_PP`.
   the clock for `M5.Rtc.setDateTime()`. Confirmed by reading
   `esp32-hal-time.c`, `M5Unified.cpp`, `RTC_Class.cpp`, and `esp_sntp.h`, and
   by reproducing + fixing on real hardware, 2026-08-30.
+
+- **Found and fixed by reading the code, 2026-09-24 -- not observed or
+  verified on hardware.** The 2026-08-30 fix above polls for sync, but
+  after the 10s poll `setup()` still called `getLocalTime()` and wrote the
+  result to the RTC whether or not sync had completed. On a cycle where
+  Wi-Fi connects but SNTP doesn't finish in 10s, that is wrong by the UTC
+  offset:
+  - `setSystemTimeFromRtc()` (`RTC_Class.cpp`) builds the system clock by
+    reading the RTC's digits as UTC (it forces `TZ=GMT0` around its
+    `mktime()`).
+  - The RTC holds *local* digits, because `setup()` writes it from
+    `getLocalTime()`.
+  - So the seed epoch is the true epoch minus the UTC offset. Read back
+    under `TZ_STRING` after `configTzTime()`, it shows 7h early (PDT) or
+    8h early (PST).
+  - `getLocalTime()` still succeeds (the year is > 2016), and that early
+    time went back into the RTC.
+  On such a cycle the header clock, `fetchTides()`'s `todayStr`, and
+  `drawNowStrip()`'s next-event choice all used the early clock. The next
+  successful sync rewrites the RTC, so the damage was limited to failed
+  cycles.
+  Fix (`setup()`, `src/main.cpp`): write the RTC only when
+  `sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED`. Otherwise call
+  `sntp_stop()` (so a late sync can't move the clock mid-cycle) and
+  `setenv("TZ", "UTC0")`/`tzset()`, so `localtime()` shows the RTC's
+  digits unchanged. That keeps the whole cycle in one "local digits read
+  as UTC" frame: `s.now`, and NOAA `lst_ldt` / Open-Meteo `timezone=auto`
+  timestamps parsed by `parseLocal()`/`parseIso()`. A Wi-Fi-failure cycle
+  already runs in that frame, because it never calls `configTzTime()`.
+  `sleepUntilNext()` schedules from the RTC's own digits, so the wake
+  alarm is unaffected either way.
 
 - Since the canvas-buffered rewrite (`src/main.cpp`, 2026-09-04), the six
   `C_BLACK/C_WHITE/C_RED/C_YELLOW/C_BLUE/C_GREEN` constants are **palette
