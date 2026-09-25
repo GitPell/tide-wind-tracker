@@ -10,8 +10,8 @@ coastal location. Wakes on a timer, fetches data over Wi-Fi, redraws, sleeps.
 > **A run-to-empty battery test is in progress -- do not interrupt it.**
 > Started 2026-09-16 (cycle 385, 100%), expected to end around 2026-10-01.
 > Until it does: no flashing and no USB connection (USB charges the battery
-> and invalidates the measurement) -- so no `pio run -t upload`, no
-> `pio device monitor`, no `tools/hil.py` against the device. Firmware and
+> and invalidates the measurement) -- so no upload to any env
+> (`pio run -e <env> -t upload`), no `pio device monitor`, no `tools/hil.py` against the device. Firmware and
 > render changes can still be written, built with plain `pio run`, and
 > checked with the SDL build (`pio run -e native`), then flashed together
 > afterwards. See DONE.md's sequencing rule and the checklist below.
@@ -121,8 +121,8 @@ baseline timing, which only needs watching.
       correct -- the RTC may lose time on a full discharge, and the error
       display doesn't flag that case (see "Design constraints" -> Error
       display).
-- [ ] Flash the current firmware (`pio run -t upload --upload-port COMx`).
-      The battery charges over USB meanwhile.
+- [ ] Flash the current firmware (`pio run -e m5stack-papercolor -t upload
+      --upload-port COMx`). The battery charges over USB meanwhile.
 - [ ] With the monitor attached from boot: the log starts at the first
       line as before (the serial wait still runs with a host), and the
       first few `WINDSRC` lines show `src=obs`.
@@ -677,7 +677,7 @@ document in PSRAM and use a filter — don't parse the whole body on the stack.
 
 ```bash
 pio run                       # build (just the two ESP32 envs -- see [platformio] default_envs)
-pio run -t upload             # flash (see button note below -- usually not needed)
+pio run -e m5stack-papercolor -t upload --upload-port COMx   # flash (see notes below)
 pio device monitor -b 115200  # serial log
 python tools/preview.py       # regenerate the layout preview PNG (PIL, not the real M5GFX draw path)
 pio run -e native -t upload   # host-side SDL preview (real render path); SDL_PREVIEW_FIXTURE=<json> picks the fixture
@@ -687,6 +687,10 @@ SDL_PREVIEW_DUMP_RAW=raw.bin pio run -e native -t upload   # dump the canvas ins
 You (Claude) can and should run these directly. Read the compiler output and
 the serial log yourself rather than asking the user to paste them.
 
+- **Always name the env when uploading.** `default_envs` lists both ESP32
+  envs, so a bare `pio run -t upload` flashes them in turn and leaves the
+  *test* firmware on the board. Use `-e m5stack-papercolor` (production) or
+  `-e m5stack-papercolor-test` (harness).
 - Uploading does **not** need the power button while the board is powered
   (awake mid-cycle, or in `TIER1_TEST`'s command loop): esptool's RTS reset
   enters the bootloader (10+ button-free uploads, 2026-09-05). The button

@@ -30,8 +30,8 @@ Fixed 2026-08-30 by polling `sntp_get_sync_status()`.
 Commits: `2e12a16` (documented as always required), corrected 2026-09-05.
 
 Uploads were first documented as needing a physical power-button press.
-During the boot-delay investigation, `pio run -t upload --upload-port COMx`
-succeeded 10+ times with no button: esptool's RTS reset enters the
+During the boot-delay investigation, `pio run -e <env> -t upload
+--upload-port COMx` succeeded 10+ times with no button: esptool's RTS reset enters the
 bootloader whenever the board is powered (awake mid-cycle, or idling in
 `TIER1_TEST`'s command loop). The button is only needed mid-sleep, when the
 PM1 has cut power and the port doesn't exist -- a different error

@@ -13,3 +13,6 @@ __pycache__/
 actual.png
 expected.png
 diff.png
+
+# SDL canvas dumps (SDL_PREVIEW_DUMP_RAW)
+raw.bin
