@@ -9,7 +9,7 @@ This file defines when the project is finished. Anything not listed here is out 
 ## 1. Runs unattended
 
 - [x] Wake cadence verified on hardware: 29.2 min observed after the `tm_isdst` fix (see CLAUDE.md, notes/soak-2026-09-11.md)
-- [x] No hang on failure: every wait is bounded (Wi-Fi 20s, time sync 10s, HTTP 15s, fixed hilo retries) and setup always reaches `drawAll()` and `sleepUntilNext()` (audit 2026-09-24)
+- [x] No hang on failure: every wait is bounded (Wi-Fi 20s, time sync 10s, fixed hilo retries; per HTTP request: DNS ~14s, TCP connect 5s, TLS handshake 120s on `237ef2f` (the measured firmware) and 15s after the observed-wind change (5s for the wind request), 15s between received bytes) and setup always reaches `drawAll()` and `sleepUntilNext()` (audit 2026-09-24)
 - [ ] A battery wake does not wait for a USB serial connection (verify `main.cpp` serial wait behavior without USB; fix if it waits)
 - [ ] Wi-Fi failures are diagnosable: `connectWifi()` logs the status code, disconnect reason, and visible networks on failure; the cause of `NO_AP_FOUND` is identified or documented
 - [ ] A failed fetch renders an explicit error state, never plausible-looking default values (e.g. 0 kn, 0.0 ft), covered by a fixture and golden
@@ -48,6 +48,7 @@ This file defines when the project is finished. Anything not listed here is out 
 
 - Tier 2 camera-based verification of the physical panel
 - Showing stale data after a failed fetch (would require persisting the last snapshot to flash)
+- OBS/FCST source label on the display
 - Reducing the `M5.begin()` startup cost (PMIC auto-probe theory unconfirmed). This is the primary lever for battery life: ~97% of daily energy goes to awake time, and `M5.begin()` is most of the ~78s awake window. Lead future-work item in the write-up
 - Pinning the TLS root CA in place of `setInsecure()`
 - 6-minute tide predictions

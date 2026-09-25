@@ -116,9 +116,23 @@ The project's finish line is defined in DONE.md. Read it before planning work, a
   run-to-empty (above), which produces the measured figure. The
   2026-09-24 reading was taken with USB attached for the serial monitor,
   for about 2 minutes (unplugged since); any charge that added inflates
-  the final days-per-charge figure.
+  the final days-per-charge figure. The run-to-empty measures `237ef2f`
+  firmware, which fetches current wind from Open-Meteo only -- the
+  observed-wind change below is not in it and adds awake time, so the
+  measured figure is for the pre-observed-wind firmware.
 
 **Not yet exercised:**
+- Observed wind (implemented and built with `pio run`, **not yet
+  flashed** -- held until the run-to-empty ends). `fetchWind()`
+  (`src/main.cpp`) now fetches NOAA `product=wind`, `date=latest` for the
+  current speed, direction, and gust, uses it only if the reading is within
+  30 min of now, and otherwise keeps Open-Meteo's `current` values.
+  Open-Meteo is still fetched every cycle for the forecast bars. Each cycle
+  logs a `WINDSRC src=obs|fcst|none reason=... age_min=...` line. Adds one
+  HTTPS request per cycle: an estimated 1-2s more awake time (unmeasured),
+  on a 5s timeout. Same change: `httpGetJson()` takes a per-call timeout
+  and now also applies it to the TLS handshake, which previously kept
+  WiFiClientSecure's 120s default.
 - Current draw. The 92.53uA standby and ~150mA average-awake figures are
   still datasheet/arithmetic estimates, not measurements on this board --
   see "Design constraints" below and the `M5.begin()` entry in "Verified
@@ -798,7 +812,17 @@ map or the metadata API: `https://api.tidesandcurrents.noaa.gov/mdapi/prod/webap
 
 1. **Observed**, if the CO-OPS station has met sensors: same datagetter with
    `product=wind`. Returns speed `s`, direction degrees `d`, gust `g`.
-2. **Forecast**, always available: Open-Meteo, no API key.
+   9414290 does: its sensor list (`mdapi/prod/webapi/stations/9414290/
+   sensors.json`) has an active Wind sensor, C1, 24 ft above the site.
+   Checked 2026-09-24: `date=latest` was 10 min old, and 14 days of history
+   (2026-09-11 to 2026-09-25 GMT) showed a reading every 6 min with no
+   gaps, no empty values, and all quality flags `0,0`. With
+   `units=english`, `s` and `g` are knots (checked against `units=metric`:
+   4.4 m/s = 8.55 kn). Implemented in `fetchWind()` but **not yet flashed**
+   -- see "Current state".
+2. **Forecast**, always available: Open-Meteo, no API key. Still fetched
+   every cycle for the forecast bars, and its `current` values are the
+   fallback when the observed reading fails or is more than 30 min old.
 
 ```
 https://api.open-meteo.com/v1/forecast?latitude=37.81&longitude=-122.47

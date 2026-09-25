@@ -15,6 +15,7 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <time.h>
+#include <climits>     // LONG_MIN -- fetchWind()'s "age unknown" marker
 #include "esp_sntp.h"  // sntp_get_sync_status() -- see setup()'s NTP-wait comment
 
 #include "config.h"
@@ -77,14 +78,22 @@ static bool readSht40(float* tempC, float* rh) {
 }
 
 // ------------------------------------------------------------------- http ---
+// timeoutMs bounds the TLS handshake and each gap between received bytes
+// separately, not the request as a whole. TCP connect keeps HTTPClient's own
+// 5s default, and DNS keeps lwip's ~14s. The handshake has to be set
+// explicitly: WiFiClientSecure defaults it to 120s, and its socket is
+// non-blocking, so a stalled handshake spins until that runs out
+// (framework WiFiClientSecure.cpp / ssl_client.cpp).
 static bool httpGetJson(const String& url, JsonDocument& doc,
-                        const DeserializationOption::Filter* filter = nullptr) {
+                        const DeserializationOption::Filter* filter = nullptr,
+                        uint32_t timeoutMs = HTTP_TIMEOUT_MS) {
   WiFiClientSecure client;
   client.setInsecure();          // no cert pinning; see CLAUDE.md
-  client.setTimeout(HTTP_TIMEOUT_MS / 1000);
+  client.setTimeout(timeoutMs / 1000);
+  client.setHandshakeTimeout(timeoutMs / 1000);
 
   HTTPClient http;
-  http.setTimeout(HTTP_TIMEOUT_MS);
+  http.setTimeout(timeoutMs);
   if (!http.begin(client, url)) { Serial.println("http begin failed"); return false; }
 
   int code = http.GET();
@@ -203,6 +212,48 @@ static bool fetchTides(Snapshot& s) {
   return s.nTide > 0;
 }
 
+// Observed wind from the station's own sensor (C1, 24 ft above the site),
+// preferred over Open-Meteo's modeled values per CLAUDE.md "Data sources".
+// `s` is speed in knots under units=english, `d` degrees, `g` gust knots --
+// all as strings, which .as<float>() parses (same as the tide `v` fields).
+// Shorter timeout than the other fetches because fetchWind() already holds
+// Open-Meteo's values as a fallback.
+static constexpr uint32_t OBS_WIND_TIMEOUT_MS = 5000;
+static constexpr long     OBS_WIND_MAX_AGE_S  = 30 * 60;
+
+// Returns nullptr and fills s.windNow/windDir/gustNow on success; otherwise
+// returns a short reason for the WINDSRC log line and leaves `s` untouched.
+// *ageMin is set whenever the reading's timestamp parsed.
+static const char* fetchObservedWind(Snapshot& s, long* ageMin) {
+  JsonDocument doc;
+  if (!httpGetJson(coopsUrl("wind", nullptr, "latest"), doc, nullptr,
+                   OBS_WIND_TIMEOUT_MS)) {
+    return "http";
+  }
+  if (doc["error"].is<JsonObject>()) {   // CO-OPS reports errors with HTTP 200
+    Serial.printf("obs wind: %s\n", doc["error"]["message"] | "?");
+    return "noaa-error";
+  }
+
+  JsonObject r = doc["data"][0];
+  const char* t  = r["t"];
+  const char* sp = r["s"];
+  const char* d  = r["d"];
+  const char* g  = r["g"];
+  if (!t || !sp || !d || !g || !*sp || !*d || !*g) return "parse";
+
+  time_t obsT = parseLocal(t);
+  if (!obsT) return "parse";
+  long age = long(time(nullptr) - obsT);
+  *ageMin = age / 60;
+  if (labs(age) > OBS_WIND_MAX_AGE_S) return "stale";
+
+  s.windNow = r["s"].as<float>();
+  s.windDir = int(lroundf(r["d"].as<float>())) % 360;
+  s.gustNow = r["g"].as<float>();
+  return nullptr;
+}
+
 static bool fetchWind(Snapshot& s) {
   String url = "https://api.open-meteo.com/v1/forecast?latitude=";
   url += String(SITE_LAT, 4);
@@ -211,22 +262,37 @@ static bool fetchWind(Snapshot& s) {
          "&current=wind_speed_10m,wind_direction_10m,wind_gusts_10m"
          "&wind_speed_unit=kn&timezone=auto&forecast_days=2";
 
+  // Open-Meteo is fetched every cycle for the forecast bars. Its `current`
+  // values are the fallback for current speed, direction and gust, and are
+  // overwritten below when the station's observed reading is usable.
   JsonDocument doc;
-  if (!httpGetJson(url, doc)) return false;
+  bool fcstOk = httpGetJson(url, doc);
+  if (fcstOk) {
+    s.windNow = doc["current"]["wind_speed_10m"] | 0.0f;
+    s.windDir = doc["current"]["wind_direction_10m"] | 0;
+    s.gustNow = doc["current"]["wind_gusts_10m"] | 0.0f;
 
-  s.windNow = doc["current"]["wind_speed_10m"] | 0.0f;
-  s.windDir = doc["current"]["wind_direction_10m"] | 0;
-  s.gustNow = doc["current"]["wind_gusts_10m"] | 0.0f;
-
-  JsonArray times = doc["hourly"]["time"];
-  JsonArray speeds = doc["hourly"]["wind_speed_10m"];
-  time_t now = time(nullptr);
-  for (size_t i = 0; i < times.size() && s.nForecast < 24; i++) {
-    time_t t = parseIso(times[i]);
-    if (t < now - 1800) continue;
-    s.forecast[s.nForecast++] = { t, speeds[i].as<float>() };
+    JsonArray times = doc["hourly"]["time"];
+    JsonArray speeds = doc["hourly"]["wind_speed_10m"];
+    time_t now = time(nullptr);
+    for (size_t i = 0; i < times.size() && s.nForecast < 24; i++) {
+      time_t t = parseIso(times[i]);
+      if (t < now - 1800) continue;
+      s.forecast[s.nForecast++] = { t, speeds[i].as<float>() };
+    }
   }
-  return true;
+  doc.clear();
+
+  // One grep-able line per cycle (WINDSRC prefix, like BATLOG): which source
+  // supplied current wind, and why the observed reading wasn't used if not.
+  // src=none means both failed and the values stay at Snapshot's zeros.
+  long ageMin = LONG_MIN;
+  const char* why = fetchObservedWind(s, &ageMin);
+  char age[16] = "?";
+  if (ageMin != LONG_MIN) snprintf(age, sizeof age, "%ld", ageMin);
+  Serial.printf("WINDSRC src=%s reason=%s age_min=%s\n",
+                why ? (fcstOk ? "fcst" : "none") : "obs", why ? why : "ok", age);
+  return fcstOk || !why;
 }
 
 // Ghost-clearing pass (see setup()) draws directly to M5.Display previously;
