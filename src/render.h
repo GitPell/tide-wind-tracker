@@ -31,6 +31,21 @@ struct TidePoint { time_t t; float ft; };
 struct TideEvent { time_t t; float ft; char kind; };  // 'H' or 'L'
 struct WindPoint { time_t t; float kt; };
 
+// What failed this cycle, as Snapshot::fail bits. 0 = nothing failed, so a
+// fixture without a "fail" key renders exactly as before these existed.
+// FAIL_WIFI implies every data flag: nothing was fetched, and the draw
+// functions treat it that way without needing the others set too.
+enum : uint16_t {
+  FAIL_WIFI       = 1 << 0,  // no Wi-Fi: no time sync, no fetches
+  FAIL_CLOCK      = 1 << 1,  // Wi-Fi up, SNTP didn't finish; RTC time used
+  FAIL_TIDE_NOW   = 1 << 2,  // neither observed level nor a prediction
+  FAIL_HILO       = 1 << 3,  // no high/low events
+  FAIL_TIDE_CURVE = 1 << 4,  // no hourly predictions
+  FAIL_WIND_NOW   = 1 << 5,  // neither NOAA observed nor Open-Meteo current
+  FAIL_FORECAST   = 1 << 6,  // no Open-Meteo hourly forecast
+  FAIL_INDOOR     = 1 << 7,  // SHT40 read failed
+};
+
 struct Snapshot {
   TidePoint tide[26];      int nTide = 0;
   TideEvent events[10];    int nEvents = 0;
@@ -54,11 +69,24 @@ struct Snapshot {
   // function of Snapshot. See CLAUDE.md's "Snapshot carries a time_t now
   // field" entry.
   time_t now = 0;
+  // FAIL_* bits above. Draw functions show "--" / "NO ... DATA" instead of
+  // a value whose source failed, and drawHeader() turns red or yellow.
+  uint16_t fail = 0;
+  // On FAIL_WIFI: the disconnect reason name (e.g. "NO_AP_FOUND"), or
+  // "TIMEOUT" / "NO_IP" when no disconnect event explains it. Shown in the
+  // header, so a Wi-Fi failure is diagnosable on battery, where Serial
+  // output is lost.
+  char wifiReason[24] = "";
 };
 
 // ------------------------------------------------------------- render API ---
 const char* compass(int deg);
 uint32_t windColor(float kt);
+
+// Fixture JSON name ("wifi", "tide_now", ...) -> FAIL_* bit, or 0 if the
+// name is unknown. Shared by both fixture parsers (main.cpp's TIER1_TEST
+// build and sdl_main.cpp) so the table lives in one place.
+uint16_t failFlagFromName(const char* name);
 
 bool initCanvas(M5Canvas& canvas);
 

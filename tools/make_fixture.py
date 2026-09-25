@@ -59,6 +59,14 @@ DEFAULT_START_EPOCH = 1788480000
 DEFAULT_HOURS = 25
 DEFAULT_NOW_OFFSET_H = 12
 
+# Snapshot::fail names, as src/render.cpp's FAIL_INFO table spells them. Each
+# one also empties or zeroes the data that failure leaves missing on the
+# device, so a failure fixture can't carry values its own flags say never
+# arrived. "wifi" implies all of them except "indoor" and "clock".
+FAIL_NAMES = ("wifi", "clock", "tide_now", "hilo", "tide_curve",
+              "wind_now", "forecast", "indoor")
+_WIFI_IMPLIES = ("tide_now", "hilo", "tide_curve", "wind_now", "forecast")
+
 
 def make_height_fn(mean=MEAN_FT, semi_amp=SEMI_AMP_FT, diurnal_amp=DIURNAL_AMP_FT):
     """Returns a height(hours_since_start) -> ft function for the tide
@@ -125,7 +133,8 @@ def build_snapshot(start_epoch, hours, now_offset_h, wind_now, gust_now, wind_di
                     indoor_c, indoor_rh, battery, ok,
                     tide_mean=MEAN_FT, tide_semi_amp=SEMI_AMP_FT, tide_diurnal_amp=DIURNAL_AMP_FT,
                     no_events=False,
-                    forecast_base=FORECAST_BASE, forecast_amp1=FORECAST_AMP1, forecast_amp2=FORECAST_AMP2):
+                    forecast_base=FORECAST_BASE, forecast_amp1=FORECAST_AMP1, forecast_amp2=FORECAST_AMP2,
+                    fail=(), wifi_reason=""):
     if hours + 1 > 26:
         raise ValueError(f"hours={hours} would produce {hours + 1} tide[] points, exceeds Snapshot::tide[26]")
 
@@ -167,7 +176,30 @@ def build_snapshot(start_epoch, hours, now_offset_h, wind_now, gust_now, wind_di
         for i in range(24)
     ]
 
-    return {
+    # Failures: blank whatever each one leaves missing on the device (see
+    # FAIL_NAMES). The "fail" and "wifiReason" keys are only emitted when
+    # set, so fixtures generated without --fail come out exactly as before.
+    missing = set(fail)
+    if "wifi" in missing:
+        missing.update(_WIFI_IMPLIES)
+    if "tide_curve" in missing:
+        tide = []
+    if "hilo" in missing:
+        events = []
+    if "tide_now" in missing:
+        tide_now = 0.0
+    if "wind_now" in missing:
+        wind_now, gust_now, wind_dir = 0.0, 0.0, 0
+    if "forecast" in missing:
+        forecast = []
+    if "indoor" in missing:
+        indoor_c, indoor_rh = 0.0, 0.0
+    # Same rule as setup() in src/main.cpp: ok = tides || wind, where tides
+    # means the hourly curve arrived and wind means either wind source did.
+    if fail:
+        ok = ok and (bool(tide) or "wind_now" not in missing)
+
+    snapshot = {
         "now": now_epoch,
         "tideNow": tide_now,
         "windNow": wind_now,
@@ -177,10 +209,13 @@ def build_snapshot(start_epoch, hours, now_offset_h, wind_now, gust_now, wind_di
         "indoorRh": indoor_rh,
         "battery": battery,
         "ok": ok,
-        "tide": tide,
-        "events": events,
-        "forecast": forecast,
     }
+    if fail:
+        snapshot["fail"] = [n for n in FAIL_NAMES if n in fail]
+    if wifi_reason:
+        snapshot["wifiReason"] = wifi_reason
+    snapshot.update({"tide": tide, "events": events, "forecast": forecast})
+    return snapshot
 
 
 _ARRAY_FIELDS = ("tide", "events", "forecast")
@@ -249,8 +284,16 @@ def main():
     parser.add_argument("--forecast-amp2", type=float, default=FORECAST_AMP2, dest="forecast_amp2",
                          help=f"Wind forecast secondary (higher-frequency) swing amplitude, kt "
                               f"(default: {FORECAST_AMP2})")
+    parser.add_argument("--fail", action="append", choices=FAIL_NAMES, default=[],
+                         help="Mark a source as failed (repeatable). Emits a \"fail\" list and blanks the "
+                              "data that failure leaves missing; \"wifi\" implies every fetch failed")
+    parser.add_argument("--wifi-reason", default="", dest="wifi_reason",
+                         help="Snapshot::wifiReason shown in the header on a Wi-Fi failure, "
+                              "e.g. NO_AP_FOUND (max 23 chars)")
     parser.add_argument("--out", help="Output path (default: stdout)")
     args = parser.parse_args()
+    if len(args.wifi_reason) > 23:
+        parser.error("--wifi-reason is longer than Snapshot::wifiReason[24] holds")
 
     start_epoch = parse_start(args.start)
     snapshot = build_snapshot(
@@ -260,6 +303,7 @@ def main():
         tide_mean=args.tide_mean, tide_semi_amp=args.tide_semi_amp, tide_diurnal_amp=args.tide_diurnal_amp,
         no_events=args.no_events,
         forecast_base=args.forecast_base, forecast_amp1=args.forecast_amp1, forecast_amp2=args.forecast_amp2,
+        fail=args.fail, wifi_reason=args.wifi_reason,
     )
 
     text = format_snapshot(snapshot)

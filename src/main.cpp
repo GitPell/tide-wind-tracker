@@ -198,17 +198,26 @@ static bool fetchTides(Snapshot& s) {
 
   // Observed level. Falls back to the prediction nearest now if the station
   // is offline, which happens more often than you would hope.
+  bool levelOk = true;
   if (httpGetJson(coopsUrl("water_level", nullptr, "latest"), doc) &&
       doc["data"][0]["v"].is<const char*>()) {
     s.tideNow = doc["data"][0]["v"].as<float>();
   } else if (s.nTide) {
     time_t now = time(nullptr);
-    float best = 1e9; 
+    float best = 1e9;
     for (int i = 0; i < s.nTide; i++) {
       float d = fabsf(float(s.tide[i].t - now));
       if (d < best) { best = d; s.tideNow = s.tide[i].ft; }
     }
+  } else {
+    levelOk = false;
   }
+
+  // Failure flags for the render (see Snapshot::fail), set from what
+  // actually arrived so they match what the draw functions check.
+  if (s.nTide < 2)  s.fail |= FAIL_TIDE_CURVE;
+  if (!s.nEvents)   s.fail |= FAIL_HILO;
+  if (!levelOk)     s.fail |= FAIL_TIDE_NOW;
   return s.nTide > 0;
 }
 
@@ -292,6 +301,9 @@ static bool fetchWind(Snapshot& s) {
   if (ageMin != LONG_MIN) snprintf(age, sizeof age, "%ld", ageMin);
   Serial.printf("WINDSRC src=%s reason=%s age_min=%s\n",
                 why ? (fcstOk ? "fcst" : "none") : "obs", why ? why : "ok", age);
+
+  if (!s.nForecast)     s.fail |= FAIL_FORECAST;
+  if (!fcstOk && why)   s.fail |= FAIL_WIND_NOW;
   return fcstOk || !why;
 }
 
@@ -376,6 +388,15 @@ static void tier1ParseSnapshot(JsonDocument& doc, Snapshot& s) {
   s.battery  = doc["battery"]  | 0;
   s.ok       = doc["ok"]       | false;
   s.now      = (time_t)(doc["now"] | (int64_t)0);
+
+  // Optional failure fields (absent in fixtures that predate them = no
+  // failure). Names map through render.cpp's shared table.
+  s.fail = 0;
+  for (JsonVariant v : doc["fail"].as<JsonArray>()) {
+    s.fail |= failFlagFromName(v | "");
+  }
+  snprintf(s.wifiReason, sizeof s.wifiReason, "%s",
+           doc["wifiReason"] | "");
 
   s.nTide = 0;
   for (JsonObject p : doc["tide"].as<JsonArray>()) {
@@ -642,7 +663,10 @@ static const char* wifiStatusName(wl_status_t st) {
 // password), or reason=0(none) (joined, but no IP from DHCP). The active
 // scan costs ~1.5-4s (up to 300ms per channel; the framework caps its wait
 // at 10s) -- only ever on a cycle that already failed.
-static void logWifiFailure(uint32_t elapsedMs) {
+// Also writes a short reason name into reasonOut for the panel header:
+// the disconnect reason, or NO_IP (joined, no DHCP answer) / TIMEOUT when
+// no disconnect event explains the failure.
+static void logWifiFailure(uint32_t elapsedMs, char* reasonOut, size_t size) {
   wl_status_t st = WiFi.status();
   uint8_t reason = s_lastDisconnectReason;  // before disconnect() overwrites it
   Serial.printf("WIFIFAIL status=%s(%d) reason=%u(%s) elapsed_ms=%lu\n",
@@ -650,6 +674,9 @@ static void logWifiFailure(uint32_t elapsedMs) {
                 reason ? WiFi.disconnectReasonName(wifi_err_reason_t(reason))
                        : "none",
                 (unsigned long)elapsedMs);
+  snprintf(reasonOut, size, "%s",
+           reason ? WiFi.disconnectReasonName(wifi_err_reason_t(reason))
+                  : (st == WL_IDLE_STATUS ? "NO_IP" : "TIMEOUT"));
 
   WiFi.disconnect();  // stop reconnect attempts: a scan can't start mid-connect
   int16_t n = WiFi.scanNetworks();
@@ -669,7 +696,7 @@ static void logWifiFailure(uint32_t elapsedMs) {
   WiFi.scanDelete();
 }
 
-static bool connectWifi() {
+static bool connectWifi(char* reasonOut, size_t size) {
   // Registering the handler is all this adds to the success path; the
   // WIFIFAIL/WIFISCAN work below runs only after the timeout expires.
   WiFi.onEvent([](arduino_event_id_t, arduino_event_info_t info) {
@@ -683,7 +710,7 @@ static bool connectWifi() {
     delay(200);
   }
   if (WiFi.status() == WL_CONNECTED) return true;
-  logWifiFailure(millis() - start);
+  logWifiFailure(millis() - start, reasonOut, size);
   return false;
 }
 
@@ -777,6 +804,7 @@ void setup() {
   snprintf(s.stationLabel, sizeof s.stationLabel, "%s", STATION_LABEL);
   if (!readSht40(&s.indoorC, &s.indoorRh)) {
     s.indoorC = 0; s.indoorRh = 0;
+    s.fail |= FAIL_INDOOR;
   }
   s.battery  = M5.Power.getBatteryLevel();
 
@@ -788,7 +816,7 @@ void setup() {
   Serial.printf("BATLOG cycle=%lu level=%d%% vbat_mv=%d\n",
                 (unsigned long)cycle, s.battery, vbatOk ? (int)battMv : -1);
 
-  if (connectWifi()) {
+  if (connectWifi(s.wifiReason, sizeof s.wifiReason)) {
     configTzTime(TZ_STRING, "pool.ntp.org", "time.nist.gov");
 
     // getLocalTime() alone can't tell a genuine NTP sync from the RTC-seeded
@@ -837,6 +865,7 @@ void setup() {
       setenv("TZ", "UTC0", 1);
       tzset();
       Serial.println("ntp failed: not synced in 10s, using RTC time");
+      s.fail |= FAIL_CLOCK;
     }
 
     bool tides = fetchTides(s);
@@ -847,6 +876,7 @@ void setup() {
     Serial.printf("tides=%d wind=%d events=%d\n", tides, wind, s.nEvents);
   } else {
     Serial.println("wifi failed");
+    s.fail |= FAIL_WIFI;  // s.wifiReason was filled in by connectWifi()
   }
 
   // Sampled once, after the Wi-Fi/SNTP attempt whether or not it succeeded,

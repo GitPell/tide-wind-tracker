@@ -64,6 +64,18 @@ void parseSnapshot(const JsonDocument& doc, Snapshot& s) {
   s.ok       = doc["ok"]       | false;
   s.now      = (time_t)(doc["now"] | (int64_t)0);
 
+  // Optional failure fields (absent in fixtures that predate them = no
+  // failure). Names map through render.cpp's shared table.
+  s.fail = 0;
+  for (JsonVariantConst v : doc["fail"].as<JsonArrayConst>()) {
+    const char* name = v | "";
+    uint16_t flag = failFlagFromName(name);
+    if (!flag) fprintf(stderr, "SDLPREVIEW: unknown fail name '%s'\n", name);
+    s.fail |= flag;
+  }
+  snprintf(s.wifiReason, sizeof s.wifiReason, "%s",
+           doc["wifiReason"] | "");
+
   s.nTide = 0;
   for (JsonObjectConst p : doc["tide"].as<JsonArrayConst>()) {
     if (s.nTide >= 26) break;

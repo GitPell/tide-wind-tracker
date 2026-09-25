@@ -1,0 +1,16 @@
+{
+  "now": 1788523200,
+  "tideNow": 0.0,
+  "windNow": 0.0,
+  "gustNow": 0.0,
+  "windDir": 0,
+  "indoorC": 21.5,
+  "indoorRh": 46.0,
+  "battery": 78,
+  "ok": false,
+  "fail": ["wifi"],
+  "wifiReason": "NO_AP_FOUND",
+  "tide": [],
+  "events": [],
+  "forecast": []
+}

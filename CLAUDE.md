@@ -63,7 +63,11 @@ The project's finish line is defined in DONE.md. Read it before planning work, a
   similar, the exact same bytes. Three real bugs found and fixed getting
   there (a rotation mismatch, a timezone mismatch, and a wrong fallback
   station label -- none in `render.cpp` itself) -- see "Verified
-  corrections".
+  corrections". **Extended to all five original fixtures, 2026-09-24:**
+  SDL dumps of `calm`, `example`, `high_wind`, `long_station`, and
+  `no_events` each report `MATCH` via `hil.py decode-raw --golden` against
+  their committed goldens. The five failure fixtures added the same day
+  have no goldens yet (see the post-run-to-empty checklist).
 - **A run-to-empty battery test is in progress -- do not interrupt it.**
   Started 2026-09-16 (cycle 385, 100%), expected to end around 2026-10-01.
   Until it does: no flashing, no USB connection (USB charges the battery
@@ -181,6 +185,33 @@ The project's finish line is defined in DONE.md. Read it before planning work, a
   the RTC; it runs the cycle on the RTC's own time instead. See the
   "Found and fixed by reading the code, 2026-09-24" entry in "Verified
   corrections".
+- Error display (implemented, rendered with the SDL build, **not yet
+  flashed**, no goldens yet). `Snapshot` carries `fail` (`FAIL_*` bits,
+  `render.h`) and `wifiReason`. `setup()`/`fetchTides()`/`fetchWind()` set
+  the bits from what actually arrived, and the draw functions never show a
+  value whose source failed:
+  - **Header:** red with `NO WIFI` (line 2: date/time + reason, e.g.
+    `NO_AP_FOUND`, or `NO_IP` / `TIMEOUT`) or `NO DATA` (every fetch
+    failed); yellow with `PARTIAL DATA` or `NO TIME SYNC`.
+  - **Line 2 for partial data:** `MISSING` plus one token per missing
+    source, in fixed order: `CLOCK LEVEL HILO TIDE WIND FCST` (clock first,
+    then top to bottom on screen). If it's wider than the header, the date
+    is dropped (time only); if still too wide, trailing tokens become
+    `+N`. With today's tokens the time-only form always fits, so `+N` is a
+    fallback that can't currently trigger.
+  - **Sections:** `--` for the tide level and for wind speed, gust, and
+    direction (no arrow, chip outline only); `NO TIDE DATA` in the tide
+    box; `NO FORECAST` in the bar area. An SHT40 failure shows `--C --%`
+    without changing the header colour.
+  - The Wi-Fi reason on the panel is what makes a Wi-Fi failure
+    diagnosable on battery, where `WIFIFAIL` serial lines are lost.
+  Fixtures: `fail_wifi`, `fail_all`, `fail_wind`, `fail_hilo`,
+  `fail_clock`. The existing five render byte-identical before and after
+  (raw SDL dumps compared with `cmp`).
+  **Not handled:** after a full discharge the RX8130 may lose time
+  (unverified). If the first boot after recharging also fails Wi-Fi (or
+  time sync), the header shows the RTC's reset time with nothing marking
+  it wrong. See the checklist item below.
 - Current draw. The 92.53uA standby and ~150mA average-awake figures are
   still datasheet/arithmetic estimates, not measurements on this board --
   see "Design constraints" below and the `M5.begin()` entry in "Verified
@@ -213,13 +244,27 @@ it before then, except the baseline timing, which only needs watching):
       `UPD HH:MM`. Time from that minute to the visible start of the panel
       refresh, over 2-3 wakes.
 - [ ] Record the run-to-empty result (Next steps #1).
+- [ ] On the first boot after recharging, check the header time is
+      correct -- the RTC may lose time on a full discharge, and the error
+      display doesn't flag that case (see the error-display entry in "Not
+      yet exercised").
 - [ ] Flash the current firmware (`pio run -t upload --upload-port COMx`).
       The battery charges over USB meanwhile.
 - [ ] With the monitor attached from boot: the log starts at the first
       line as before (the serial wait still runs with a host), and the
       first few `WINDSRC` lines show `src=obs`.
-- [ ] Flash `m5stack-papercolor-test`, run `python tools/hil.py test
-      --all` (expect 5/5 PASS), then flash `m5stack-papercolor` back.
+- [ ] Flash `m5stack-papercolor-test`. First capture goldens for the new
+      fixtures (`fail_wifi`, `fail_all`, `fail_wind`, `fail_hilo`,
+      `fail_clock`): `python tools/hil.py render test/fixtures/<name>.json
+      --out test/golden/<name>.png`. Review each, and commit them on their
+      own with a stated reason (e.g. "add goldens for the error-display
+      fixtures"). Until then `test --all` counts each missing golden as a
+      failure. Then run `python tools/hil.py test --all` and expect 10/10
+      PASS. Flash `m5stack-papercolor` back. Finally, confirm the SDL
+      renders of the five new fixtures match their new goldens
+      (`SDL_PREVIEW_DUMP_RAW` + `hil.py decode-raw --golden`). That
+      completes DONE.md's "SDL byte-identical for every fixture" item; the
+      original five already match (see "Current state").
 - [ ] Unplugged, on battery: repeat the baseline timing. Expect the panel
       refresh to start ~14s earlier (~15.5s serial wait removed, minus the
       estimated 1-2s the observed-wind request adds).
@@ -1060,6 +1105,14 @@ occasionally: it's closer to a fast unit test than a hardware step.
   took an actual render to notice -- nothing about the JSON itself looked
   wrong on inspection. Regenerate with `python tools/make_fixture.py --out
   test/fixtures/example.json`; don't hand-edit `tide[]`/`events[]` directly.
+  Failure fixtures come from the same generator: `--fail NAME`
+  (repeatable; names as in `render.cpp`'s `FAIL_INFO`) and
+  `--wifi-reason`. Each failure also blanks the data it leaves missing, so
+  a fixture can't carry values its own flags say never arrived. For
+  example: `--fail wifi --wifi-reason NO_AP_FOUND --out
+  test/fixtures/fail_wifi.json`, or `--fail wind_now --fail forecast` for
+  `fail_wind.json`. No Python on PATH on this machine? PlatformIO's own
+  (`~/.platformio/penv/Scripts/python.exe`) has Pillow and pyserial.
 
 - **Goldens live in `test/golden/` and are committed.** `actual.png`,
   `expected.png`, and `diff.png` are gitignored -- they're `test` output,
