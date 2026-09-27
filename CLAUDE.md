@@ -8,7 +8,8 @@ coastal location. Wakes on a timer, fetches data over Wi-Fi, redraws, sleeps.
 ## READ THIS FIRST (instructions for Claude)
 
 > **A run-to-empty battery test is in progress -- do not interrupt it.**
-> Started 2026-09-16 (cycle 385, 100%), expected to end around 2026-10-01.
+> Started 2026-09-16 (cycle 385, 100%), expected to end around 2026-10-01 --
+> possibly sooner: the gauge already read 0% on 2026-09-27.
 > Until it does: no flashing and no USB connection (USB charges the battery
 > and invalidates the measurement) -- so no upload to any env
 > (`pio run -e <env> -t upload`), no `pio device monitor`, no `tools/hil.py` against the device. Firmware and
@@ -88,10 +89,12 @@ run-to-empty measures `237ef2f`, which has none of these):
   `fail_clock`) render via the SDL build but have no goldens yet.
 
 **Open items:**
-1. Let the run-to-empty finish (~2026-10-01; do not interrupt it). "Empty" =
-   the device no longer completes a wake cycle. Record the last completed
+1. Let the run-to-empty finish (~2026-10-01 or sooner; do not interrupt it).
+   The gauge reached 0% before empty: the panel showed `BAT 0%` at
+   2026-09-27 15:23 while the device kept completing cycles. "Empty" = the
+   device no longer completes a wake cycle. Record the last completed
    cycle's time -- the frozen frame's footer (`UPD HH:MM`) shows it, so check
-   the panel daily to pin down the date -- and its cycle number (estimate
+   the footer several times a day to pin down when it stops -- and its cycle number (estimate
    from elapsed time at ~31.7 min/cycle if it can't be read back). Then
    enter the measured days-per-charge in "Battery budget", compare it to the
    ~1 month goal, and document the shortfall, stating the firmware measured
@@ -497,7 +500,8 @@ these were found are in `notes/writeup-material.md`.
 ## Battery budget
 
 Target: roughly a month per charge on the 1250mAh cell. **Current best
-estimate: ~15 days** -- about half.
+estimate: ~15 days** -- about half. **Measured so far: at least 11.03 days**
+(the run was still cycling on 2026-09-27 15:23).
 
 - **Soak 2** (`237ef2f`, 2026-09-16 14:32 cycle 385 at 100% -> 2026-09-24
   20:23 cycle 760 at 46%): 375 cycles over 197h51m (**8.24 days**), **31.7
@@ -505,10 +509,15 @@ estimate: ~15 days** -- about half.
   0.144%/cycle**; linear projection **~15 days per charge**. Raw readings in
   `notes/soak-2026-09-11.md`. **Gauge caveat:** assumes
   `M5.Power.getBatteryLevel()` is linear in remaining capacity (unverified;
-  how the gauge works is unconfirmed), and the device may stop completing
-  cycles before the gauge reads 0%. The 2026-09-24 reading was taken with USB
-  attached for about 2 minutes; any charge that added inflates the final
-  figure.
+  how the gauge works is unconfirmed). The 2026-09-24 reading was taken
+  with USB attached for about 2 minutes; any charge that added inflates the
+  final figure.
+- **Gauge at 0% before empty** (2026-09-27 15:23, read from the panel, no
+  USB): `BAT 0%` while the device was still completing cycles. 46% -> 0% took
+  2.79 days, ~16.5%/day -- about 2.5x soak 2's ~6.55%/day average, which
+  suggests the gauge isn't linear near empty either. So the ~15-day
+  projection is doubly uncertain; only the run-to-empty's last completed
+  cycle gives the real figure.
 - **Soak 1** (2026-09-11 to 2026-09-14, 100%->98% over 45 cycles / 66h57m)
   was read as "month-shaped, not week-shaped" drain. **Withdrawn:** soak 2
   drained ~3.3x faster per cycle (0.144% vs 0.044%). The cause is
