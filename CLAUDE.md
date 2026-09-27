@@ -120,6 +120,10 @@ baseline timing, which only needs watching.
       `UPD HH:MM`. Time from that minute to the visible start of the panel
       refresh, over 2-3 wakes.
 - [ ] Record the run-to-empty result (Open items #1).
+- [ ] Replace the battery placeholder in `docs/writeup.md` (§8) and the
+      ~15-day projection in the README's known limitations with the
+      measured days-per-charge, including that the gauge reached 0% before
+      empty. Then tick DONE.md §5's known-limitations item.
 - [ ] On the first boot after recharging, check the header time is
       correct -- the RTC may lose time on a full discharge, and the error
       display doesn't flag that case (see "Design constraints" -> Error
