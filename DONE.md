@@ -40,7 +40,7 @@ This file defines when the project is finished. Anything not listed here is out 
 ## 5. Documented
 
 - [x] CLAUDE.md "Current state" and "Next steps" brought up to date (stale headers fixed, overlapping sections merged, soak 2 results recorded, and the "month-shaped" battery conclusion from soak 1 corrected) (`4aa9fcb`)
-- [ ] README covers: what it is, a photo of the device, a sample render, an architecture overview, build and run steps, the testing approach, and known limitations
+- [x] README covers: what it is, a photo of the device, a sample render, an architecture overview, build and run steps, the testing approach, and known limitations (`3443a9e`)
 - [ ] Known limitations in the README include measured battery life vs the one-month goal, the ~50s `M5.begin()` startup cost as its main cause, and TLS via `setInsecure()`
 - [x] Write-up drafted (audience and format: TBD by Chris) (`docs/writeup.md`)
 

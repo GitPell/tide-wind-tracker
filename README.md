@@ -7,7 +7,7 @@ E Ink Spectra 6 panel). Every 30 minutes it powers up, fetches data over
 Wi-Fi from NOAA CO-OPS and Open-Meteo, redraws, and powers itself off
 completely until the next wake.
 
-![The tracker on a shelf](docs/photo.jpg)
+![The tracker running](docs/photo.jpg)
 
 ![Sample render](test/golden/example.png)
 
