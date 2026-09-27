@@ -98,6 +98,51 @@ reached the module through the graphics library on the device build, and
 silently replaced a constant I had named `DEG_TO_RAD` with its own macro. The
 compiler error pointed at a number where a name should be.
 
+Here is how the pieces fit: one render module, three ways in, and one set of
+goldens that both test paths compare against.
+
+```mermaid
+flowchart TB
+    NET["NOAA CO-OPS + Open-Meteo"]
+    MF["tools/make_fixture.py"]
+    FIX["test/fixtures/*.json"]
+
+    subgraph prod ["Production firmware (m5stack-papercolor)"]
+        FETCH["main.cpp setup():<br/>fetchTides() / fetchWind()"]
+        PANEL["drawAll(): pushSprite() + display()<br/>to the e-paper panel"]
+    end
+
+    subgraph tier1 ["Tier 1 test firmware (m5stack-papercolor-test)"]
+        T1IN["fixture JSON over USB serial:<br/>tier1ParseSnapshot()"]
+        T1OUT["tier1WriteAll():<br/>canvas bytes as base64 over serial"]
+    end
+
+    subgraph sdl ["SDL desktop build (native)"]
+        SDLIN["sdl_main.cpp:<br/>loadFixture() / parseSnapshot()"]
+        SDLOUT["SDL_PREVIEW_DUMP_RAW:<br/>raw canvas dump"]
+    end
+
+    SNAP["Snapshot (render.h)"]
+    RENDER["render.cpp: initCanvas() +<br/>drawHeader() … drawFooter()"]
+    CANVAS["M5Canvas, palette_4bit<br/>400x600 = 120,000 bytes"]
+    PAL["palette.json"]
+    HIL["tools/hil.py:<br/>decode_palette4() → images_equal()"]
+    GOLD["test/golden/*.png"]
+
+    NET --> FETCH --> SNAP
+    MF --> FIX
+    FIX --> T1IN --> SNAP
+    FIX --> SDLIN --> SNAP
+    SNAP --> RENDER --> CANVAS
+    PAL -. "gen_layout_header.py → src/layout.h,<br/>loaded by initCanvas()" .-> CANVAS
+    PAL -.-> HIL
+    CANVAS --> PANEL
+    CANVAS --> T1OUT -->|"hil.py test"| HIL
+    CANVAS --> SDLOUT -->|"hil.py decode-raw"| HIL
+    HIL -->|"hil.py render --out, from the device only;<br/>reviewed, committed on its own"| GOLD
+    GOLD -->|"byte-exact compare"| HIL
+```
+
 The goal was not "the desktop build runs". It was: the desktop build produces
 **the same bytes** as the device. The SDL build can dump its canvas, and the
 test harness decodes that dump with the same function it uses for the
