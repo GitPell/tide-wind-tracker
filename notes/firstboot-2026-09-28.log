@@ -1,0 +1,20 @@
+2026-09-28 15:15:47.925 | # logger started; waiting for 303A:1001
+2026-09-28 15:17:56.591 | # connected to COM4
+2026-09-28 15:17:56.591 | [   273][I][M5GFX.cpp:2227] autodetect(): [M5GFX] [Autodetect] board_M5PaperColor
+2026-09-28 15:18:13.787 | [ 17465][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 15:18:47.753 | [ 51435][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 15:18:47.763 | [ 51445][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 15:18:48.316 | M5.begin() took 51236 ms
+2026-09-28 15:18:48.327 | [I][M5PM1_SYS] Device: ID=0x50 MODEL=0x20 HW=0x05 SW=0x53(S)
+2026-09-28 15:18:48.335 | [I][M5PM1_I2C] I2C config set and verified: sleep=0, speed=100K
+2026-09-28 15:18:48.370 | [I][M5PM1_I2C] M5PM1 initialized at address 0x6E (I2C: 100000 Hz)
+2026-09-28 15:18:48.454 | [I][M5PM1_SYS] RTC_RAM write and verified: offset=0, length=4
+2026-09-28 15:18:48.455 | 
+2026-09-28 15:18:48.455 | === cycle 1 ===
+2026-09-28 15:18:48.468 | BATLOG cycle=1 level=0% vbat_mv=3276
+2026-09-28 15:18:58.753 | tides=1 wind=1 events=8
+2026-09-28 15:19:15.737 | canvas: 400x600 @ palette_4bit = 120000 bytes, heap before=276976 after=276912 (used=64)
+2026-09-28 15:19:32.706 | [ 96383][W][WiFiGeneric.cpp:1062] _eventCallback(): Reason: 8 - ASSOC_LEAVE
+2026-09-28 15:19:32.815 | [I][M5PM1_GPIO] GPIO2 Wake Enabled
+2026-09-28 15:19:32.835 | [I][M5PM1_PWR] Shutdown requested
+2026-09-28 15:19:32.962 | # port COM4 gone (SerialException); waiting again

@@ -323,7 +323,7 @@ camera stayed out of scope, and I still think that was right.
 
 The irony is the power profiler. It was the cheapest item on the list and the
 one I deferred most casually. Battery life turned out to be the project's
-main open result, and without the profiler I had to measure it indirectly:
+main result, and without the profiler I had to measure it indirectly:
 soak tests, a percentage gauge whose linearity I can't verify, and
 arithmetic. The soaks weren't wasted: the first one is what exposed the
 hour-late alarm. But the energy questions, such as how much a wake costs,
@@ -343,11 +343,18 @@ What exists now:
   original fixtures.
 - A repo that builds from a fresh clone by following the README.
 
-Battery life is **[PLACEHOLDER: update after the run-to-empty, ~2026-10-01]**.
-The current projection is about 15 days per charge, half the one-month goal:
-the gauge went from 100% to 46% over 8.24 days and 375 cycles. The main cause
-is known. The board's library initialization takes about 50 seconds of a
-roughly 93-second wake, and awake time is about 97 percent of daily energy.
+Battery life is **11.0 to 11.7 days per charge**, about a third of the
+one-month goal. I ran the device from a full charge until it stopped. The
+last cycle I can confirm is a photo of the panel from 11.0 days in, and I
+found it dead 11.7 days in; the exact end is somewhere between. The fuel
+gauge read 0% up to ~17 hours before the end, so its percentages near empty
+mean little. The device died mid-refresh, browning out at its
+highest-current moment: the panel was left half black, half blank. The main
+cause is known. The board's library initialization takes about 50 seconds
+of a roughly 93-second wake, and awake time is about 97 percent of daily
+energy. The firmware I measured still had the 15.5-second wait for a USB
+host on every wake. The current firmware skips it, so it should last
+longer, but I haven't measured it.
 
 What I would tell someone trying the same thing:
 

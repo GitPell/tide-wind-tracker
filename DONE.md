@@ -4,7 +4,7 @@ This file defines when the project is finished. Anything not listed here is out 
 
 **Agents:** use this file as the reference for gap audits. Do not add, remove, or reword criteria without explicit user instruction. Report status against each item; do not check boxes yourself.
 
-**Sequencing rule:** the baseline run-to-empty (started 2026-09-16, expected to end around 2026-10-01) must not be interrupted. Do not flash or connect USB until it completes; USB charges the battery and invalidates the measurement. Firmware changes may be written and reviewed (and render changes checked with the SDL build) before then, and flashed together afterwards.
+**Sequencing rule:** the baseline run-to-empty (started 2026-09-16) ended on 2026-09-28, at 11.0-11.7 days on `237ef2f`. Flashing and USB are now allowed: the firmware changes held back during it are flashed together, following the "After the run-to-empty ends" checklist in CLAUDE.md.
 
 ## 1. Runs unattended
 
@@ -14,7 +14,7 @@ This file defines when the project is finished. Anything not listed here is out 
 - [ ] Wi-Fi failures are diagnosable: `connectWifi()` logs the status code, disconnect reason, and visible networks on failure; the cause of `NO_AP_FOUND` is identified or documented
 - [ ] A failed fetch renders an explicit error state, never plausible-looking default values (e.g. 0 kn, 0.0 ft), covered by a fixture and golden
 - [ ] Observed wind resolved: either implemented per "Data sources", or CLAUDE.md records Open-Meteo-only as deliberate, with the reason
-- [ ] Days per charge measured by the baseline run-to-empty ("empty" = device no longer completes a wake cycle; last completed cycle number and time recorded), entered in the CLAUDE.md battery budget, and compared to the ~1 month design goal. The shortfall (projected ~15 days) is documented as a known limitation. The firmware version measured is stated, along with any later change that affects awake time
+- [x] Days per charge measured by the baseline run-to-empty ("empty" = device no longer completes a wake cycle; last completed cycle bracketed by evidence (the cycle counter did not survive the full discharge)), entered in the CLAUDE.md battery budget, and compared to the ~1 month design goal. The shortfall (projected ~15 days) is documented as a known limitation. The firmware version measured is stated, along with any later change that affects awake time (11.0-11.7 days on `237ef2f`: last confirmed completed cycle 2026-09-27 15:23, found dead 2026-09-28 ~08:00)
 
 ## 2. Reproducible from a clean clone
 
@@ -41,7 +41,7 @@ This file defines when the project is finished. Anything not listed here is out 
 
 - [x] CLAUDE.md "Current state" and "Next steps" brought up to date (stale headers fixed, overlapping sections merged, soak 2 results recorded, and the "month-shaped" battery conclusion from soak 1 corrected) (`4aa9fcb`)
 - [x] README covers: what it is, a photo of the device, a sample render, an architecture overview, build and run steps, the testing approach, and known limitations (`3443a9e`)
-- [ ] Known limitations in the README include measured battery life vs the one-month goal, the ~50s `M5.begin()` startup cost as its main cause, and TLS via `setInsecure()`
+- [x] Known limitations in the README include measured battery life vs the one-month goal, the ~50s `M5.begin()` startup cost as its main cause, and TLS via `setInsecure()`
 - [x] Write-up drafted (audience and format: TBD by Chris) (`docs/writeup.md`)
 
 ## Out of scope / future work

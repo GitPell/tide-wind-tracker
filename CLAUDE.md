@@ -7,15 +7,10 @@ coastal location. Wakes on a timer, fetches data over Wi-Fi, redraws, sleeps.
 
 ## READ THIS FIRST (instructions for Claude)
 
-> **A run-to-empty battery test is in progress -- do not interrupt it.**
-> Started 2026-09-16 (cycle 385, 100%), expected to end around 2026-10-01 --
-> possibly sooner: the gauge already read 0% on 2026-09-27.
-> Until it does: no flashing and no USB connection (USB charges the battery
-> and invalidates the measurement) -- so no upload to any env
-> (`pio run -e <env> -t upload`), no `pio device monitor`, no `tools/hil.py` against the device. Firmware and
-> render changes can still be written, built with plain `pio run`, and
-> checked with the SDL build (`pio run -e native`), then flashed together
-> afterwards. See DONE.md's sequencing rule and the checklist below.
+> **The run-to-empty battery test ended on 2026-09-28** (11.0-11.7 days per
+> charge on `237ef2f`; see "Battery budget"). Flashing and USB are allowed
+> again. Work through the "After the run-to-empty ends" checklist below one
+> step at a time, stopping for the human at each physical step.
 
 The project's finish line is defined in DONE.md. Read it before planning
 work, and treat anything not listed there as out of scope.
@@ -51,7 +46,7 @@ The libraries do **not** need cloning — `pio run` fetches them into
 
 ---
 
-## Status (updated 2026-09-25)
+## Status (updated 2026-09-28)
 
 DONE.md is the authoritative scope; this section is the working state
 toward it.
@@ -59,8 +54,9 @@ toward it.
 **Works, confirmed on real hardware:**
 - Full cycle: Wi-Fi -> NTP -> NOAA tides -> Open-Meteo wind -> draw -> PM1
   shutdown -> RX8130 wake -> cold boot, at a 2-minute test cadence and the
-  production 30-minute cadence. The PM1-RTC-RAM cycle counter survives power
-  cuts and reflashing.
+  production 30-minute cadence. The PM1-RTC-RAM cycle counter survives the
+  power cut between cycles and reflashing, but **not a full discharge**: it
+  restarted at 1 after the 2026-09-28 run-to-empty.
 - The complete draw (header, now strip, tide curve, wind rose and chip,
   forecast bars, footer) with real fonts, rendered through an off-screen
   canvas pushed once per cycle. `layout.json`'s `preview_only` section holds
@@ -75,8 +71,8 @@ toward it.
   fixtures are byte-identical to their device goldens (`hil.py decode-raw
   --golden`, 2026-09-24; rechecked on the pinned M5GFX 2026-09-25).
 
-**Built, not yet on hardware** (all held until the run-to-empty ends; the
-run-to-empty measures `237ef2f`, which has none of these):
+**Built, not yet on hardware** (ready to flash now that the run-to-empty has
+ended; the measured battery figure is for `237ef2f`, which has none of these):
 - Observed wind from NOAA, with Open-Meteo fallback (`6d5d443`) -- see
   "Data sources". Adds an estimated 1-2 s awake per cycle (unmeasured).
 - Skipping the USB serial wait when no host is attached (`5c5c8ba`) -- saves
@@ -89,21 +85,11 @@ run-to-empty measures `237ef2f`, which has none of these):
   `fail_clock`) render via the SDL build but have no goldens yet.
 
 **Open items:**
-1. Let the run-to-empty finish (~2026-10-01 or sooner; do not interrupt it).
-   The gauge reached 0% before empty: the panel showed `BAT 0%` at
-   2026-09-27 15:23 while the device kept completing cycles. "Empty" = the
-   device no longer completes a wake cycle. Record the last completed
-   cycle's time -- the frozen frame's footer (`UPD HH:MM`) shows it, so check
-   the footer several times a day to pin down when it stops -- and its cycle number (estimate
-   from elapsed time at ~31.7 min/cycle if it can't be read back). Then
-   enter the measured days-per-charge in "Battery budget", compare it to the
-   ~1 month goal, and document the shortfall, stating the firmware measured
-   (`237ef2f`).
-2. Wi-Fi `NO_AP_FOUND` still unresolved. The diagnostics above are built but
+1. Wi-Fi `NO_AP_FOUND` still unresolved. The diagnostics above are built but
    not flashed; the cause still has to be identified from a real
    occurrence, or documented as unknown, per DONE.md.
-3. Current draw is unmeasured (the 92.53 uA standby and ~150 mA awake
-   figures are datasheet/arithmetic). The run-to-empty measures
+2. Current draw is unmeasured (the 92.53 uA standby and ~150 mA awake
+   figures are datasheet/arithmetic). The run-to-empty measured
    days-per-charge directly, so a current measurement is only needed to
    attribute energy across `M5.begin()`, Wi-Fi, and the panel refresh.
 
@@ -118,16 +104,21 @@ baseline timing, which only needs watching.
       touching the device. The wake alarm fires on a whole minute (the
       RX8130 alarm has no seconds field), 30-31 min after the footer's
       `UPD HH:MM`. Time from that minute to the visible start of the panel
-      refresh, over 2-3 wakes.
-- [ ] Record the run-to-empty result (Open items #1).
-- [ ] Replace the battery placeholder in `docs/writeup.md` (§8) and the
+      refresh, over 2-3 wakes. **Missed:** not done before the run ended;
+      a baseline would now mean reflashing `237ef2f`.
+- [x] Record the run-to-empty result: 11.0-11.7 days (see "Battery
+      budget" and `notes/soak-2026-09-11.md`).
+- [x] Replace the battery placeholder in `docs/writeup.md` (§8) and the
       ~15-day projection in the README's known limitations with the
       measured days-per-charge, including that the gauge reached 0% before
       empty. Then tick DONE.md §5's known-limitations item.
-- [ ] On the first boot after recharging, check the header time is
+- [x] On the first boot after recharging, check the header time is
       correct -- the RTC may lose time on a full discharge, and the error
       display doesn't flag that case (see "Design constraints" -> Error
-      display).
+      display). 2026-09-28 15:18: header `Mon 28 Sep 15:18`, footer
+      `UPD 15:18`, both correct. That boot synced NTP before drawing, so it
+      shows the header right after a sync; it doesn't show whether the RTC
+      itself kept time through the discharge.
 - [ ] Flash the current firmware (`pio run -e m5stack-papercolor -t upload
       --upload-port COMx`). The battery charges over USB meanwhile.
 - [ ] With the monitor attached from boot: the log starts at the first
@@ -145,9 +136,11 @@ baseline timing, which only needs watching.
       (`SDL_PREVIEW_DUMP_RAW` + `hil.py decode-raw --golden`). That
       completes DONE.md's "SDL byte-identical for every fixture" item; the
       original five already match (see "Status").
-- [ ] Unplugged, on battery: repeat the baseline timing. Expect the panel
-      refresh to start ~14s earlier (~15.5s serial wait removed, minus the
-      estimated 1-2s the observed-wind request adds).
+- [ ] Unplugged, on battery: time wake-to-refresh on the new firmware and
+      compare with the source-based expectation (~62 s: ~51 s `M5.begin()`,
+      ~10.5 s Wi-Fi + fetch, ~1-2 s observed wind; `237ef2f` would have
+      added the ~15.5 s serial wait). No before measurement exists
+      (missed).
 - [ ] Provoke a Wi-Fi failure with a nonexistent `WIFI_SSID` (see "Serial
       log lines"), confirm the `WIFIFAIL`/`WIFISCAN` lines appear as
       expected, then restore `config.h` and reflash.
@@ -503,9 +496,19 @@ these were found are in `notes/writeup-material.md`.
 
 ## Battery budget
 
-Target: roughly a month per charge on the 1250mAh cell. **Current best
-estimate: ~15 days** -- about half. **Measured so far: at least 11.03 days**
-(the run was still cycling on 2026-09-27 15:23).
+Target: roughly a month per charge on the 1250mAh cell. **Measured: 11.0-11.7
+days per charge** on `237ef2f` -- about 37-39% of the goal.
+
+- **Run-to-empty** (`237ef2f`, from 100% at 2026-09-16 14:32:48, cycle 385):
+  the last confirmed completed cycle is a photo of the panel showing
+  `UPD 15:23` on 2026-09-27 (11.03 days); the device was seen dead at about
+  08:00 on 2026-09-28 (11.73 days). It browned out mid-refresh (panel half
+  black, half blank), so the final frame's time is lost, and the cycle
+  counter restarted at 1 on the first boot after recharging, so it can't
+  narrow the bracket. The 2026-09-24 reading had ~2 minutes of USB
+  attached, so the figure may be slightly optimistic. The current firmware
+  skips the ~15.5 s serial wait and adds ~1-2 s for observed wind, so it
+  should last longer; not measured.
 
 - **Soak 2** (`237ef2f`, 2026-09-16 14:32 cycle 385 at 100% -> 2026-09-24
   20:23 cycle 760 at 46%): 375 cycles over 197h51m (**8.24 days**), **31.7
@@ -519,9 +522,9 @@ estimate: ~15 days** -- about half. **Measured so far: at least 11.03 days**
 - **Gauge at 0% before empty** (2026-09-27 15:23, read from the panel, no
   USB): `BAT 0%` while the device was still completing cycles. 46% -> 0% took
   2.79 days, ~16.5%/day -- about 2.5x soak 2's ~6.55%/day average, which
-  suggests the gauge isn't linear near empty either. So the ~15-day
-  projection is doubly uncertain; only the run-to-empty's last completed
-  cycle gives the real figure.
+  suggests the gauge isn't linear near empty either. The device kept
+  running for up to ~0.7 more days after the gauge read 0%. The soak's
+  ~15-day linear projection overestimated the result.
 - **Soak 1** (2026-09-11 to 2026-09-14, 100%->98% over 45 cycles / 66h57m)
   was read as "month-shaped, not week-shaped" drain. **Withdrawn:** soak 2
   drained ~3.3x faster per cycle (0.144% vs 0.044%). The cause is
@@ -541,9 +544,10 @@ estimate: ~15 days** -- about half. **Measured so far: at least 11.03 days**
   under 3% of that, so ~97% of daily energy is awake time: ~1.75mAh per ~93s
   window, i.e. ~67mA average awake -- below the ~150mA once assumed (the original
   budget: ~20 s at ~150mA = ~0.85mAh/cycle, 48 cycles/day ≈ 41mAh, plus
-  ~2.2mAh/day sleeping ≈ 43mAh/day). The run-to-empty (on
-  `237ef2f`, ending ~2026-10-01) replaces the projection with a measured
-  days-per-charge figure.
+  ~2.2mAh/day sleeping ≈ 43mAh/day). From the run-to-empty instead, and
+  assuming the full rated 1250mAh was delivered: ~107-113mAh/day, i.e.
+  ~2.3-2.4mAh per ~93s wake, ~90-95mA average awake. Both estimates rest on
+  unverified assumptions (gauge linearity; delivered capacity).
 
 ---
 

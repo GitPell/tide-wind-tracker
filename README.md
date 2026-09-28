@@ -150,11 +150,13 @@ For a diagram of how the firmware, test firmware and desktop build share one ren
 
 ## Known limitations
 
-- **Battery life is about half the one-month goal.** A soak test projected
-  **~15 days per charge**: the fuel gauge read 100% -> 46% over 8.24 days,
-  extrapolated linearly. The gauge's linearity is unverified, so treat this
-  as an estimate. *(To be replaced by the measured result of a run-to-empty
-  test ending around 2026-10-01.)*
+- **Battery life is about a third of the one-month goal: 11.0-11.7 days per
+  charge**, measured by running the device from 100% until it stopped. The
+  last confirmed cycle was at 11.03 days and it was found dead at 11.73
+  days. The fuel gauge read 0% up to ~17 hours before the end, so don't trust
+  its percentage near empty. The measured firmware still spent ~15.5 s of
+  every wake waiting for a USB host, which the current firmware skips, so
+  it should last longer; that hasn't been measured.
 - **The main cause is `M5.begin()`, which takes ~50 s on every wake**, out
   of ~93 s awake. Awake time is ~97% of daily energy use. No configuration
   flag found so far reduces it.
