@@ -1,0 +1,21 @@
+2026-09-28 15:48:31.563 | # logger started; waiting for 303A:1001
+2026-09-28 15:48:31.572 | # connected to COM4
+2026-09-28 15:48:42.678 | [ 17189][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 15:49:16.178 | [ 50690][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 15:49:16.188 | [ 50701][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 15:49:16.734 | M5.begin() took 50490 ms
+2026-09-28 15:49:16.757 | [I][M5PM1_SYS] Device: ID=0x50 MODEL=0x20 HW=0x05 SW=0x53(S)
+2026-09-28 15:49:16.759 | [I][M5PM1_I2C] I2C config set and verified: sleep=0, speed=100K
+2026-09-28 15:49:16.796 | [I][M5PM1_I2C] M5PM1 initialized at address 0x6E (I2C: 100000 Hz)
+2026-09-28 15:49:16.880 | [I][M5PM1_SYS] RTC_RAM write and verified: offset=0, length=4
+2026-09-28 15:49:16.880 | 
+2026-09-28 15:49:16.880 | === cycle 2 ===
+2026-09-28 15:49:16.892 | BATLOG cycle=2 level=40% vbat_mv=3626
+2026-09-28 15:49:19.948 | ntp failed: not synced in 10s, using RTC time
+2026-09-28 15:49:27.230 | WINDSRC src=fcst reason=stale age_min=427
+2026-09-28 15:49:27.230 | tides=1 wind=1 events=8
+2026-09-28 15:49:27.234 | canvas: 400x600 @ palette_4bit = 120000 bytes, heap before=276480 after=276616 (used=-136)
+2026-09-28 15:49:44.033 | [ 78542][W][WiFiGeneric.cpp:1062] _eventCallback(): Reason: 8 - ASSOC_LEAVE
+2026-09-28 15:49:44.143 | [I][M5PM1_GPIO] GPIO2 Wake Enabled
+2026-09-28 15:49:44.163 | [I][M5PM1_PWR] Shutdown requested
+2026-09-28 15:49:44.285 | # port COM4 gone (SerialException); waiting again

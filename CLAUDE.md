@@ -78,7 +78,7 @@ ended; the measured battery figure is for `237ef2f`, which has none of these):
 - Skipping the USB serial wait when no host is attached (`5c5c8ba`) -- saves
   ~15.5 s per battery wake; see "Verified corrections" -> USB serial.
 - Wi-Fi failure diagnostics (`d237a73`) -- see "Serial log lines".
-- Time-sync failure handling (`b9607a8`) -- found by reading the code, never
+- Time-sync failure handling (`b9607a8`, plus the read-once fix) -- found by reading the code, never
   observed; see "Verified corrections" -> Time.
 - Error display (`fd2298b`) -- see "Design constraints". Five failure
   fixtures (`fail_wifi`, `fail_all`, `fail_wind`, `fail_hilo`,
@@ -123,7 +123,14 @@ baseline timing, which only needs watching.
       --upload-port COMx`). The battery charges over USB meanwhile.
 - [ ] With the monitor attached from boot: the log starts at the first
       line as before (the serial wait still runs with a host), and the
-      first few `WINDSRC` lines show `src=obs`.
+      first few `WINDSRC` lines show `src=obs`. First try, `6dfc08a`,
+      2026-09-28 15:49 (`notes/newfw-firstboot-2026-09-28.log`): the log
+      started as expected, but `WINDSRC src=fcst reason=stale
+      age_min=427` -- caused by the `sntp_get_sync_status()` double read
+      (see "Verified corrections" -> Time), not by the wind code.
+- [ ] Normal-boot success path, after flashing the read-once fix: no
+      `ntp failed` line in the log, a blue header with the correct local
+      time, and `WINDSRC src=obs`.
 - [ ] Flash `m5stack-papercolor-test`. First capture goldens for the new
       fixtures (`fail_wifi`, `fail_all`, `fail_wind`, `fail_hilo`,
       `fail_clock`): `python tools/hil.py render test/fixtures/<name>.json
@@ -340,8 +347,16 @@ these were found are in `notes/writeup-material.md`.
   `sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED` (`esp_sntp.h`)
   before reading the clock. Reproduced and fixed on hardware, 2026-08-30
   (`bebec80`).
+- **`sntp_get_sync_status()` is read-once.** After it returns
+  `SNTP_SYNC_STATUS_COMPLETED` it resets itself to `SNTP_SYNC_STATUS_RESET`
+  (`esp_sntp.h`'s own doc comment). Poll it exactly once per iteration and
+  keep the result in a variable; never call it again to "check" the
+  outcome. A second call reads RESET even right after a successful sync.
+  It is called only in `setup()`'s NTP wait (`sntpStatus`); no pinned
+  library calls it. Found on hardware, 2026-09-28 (see the next entry).
 - **Don't write an unsynced clock back to the RTC** (found by reading the
-  code, 2026-09-24; not observed or verified on hardware). After the 10s
+  code, 2026-09-24; the failure path itself is still not observed on
+  hardware). After the 10s
   poll, `setup()` used to write the clock to the RTC whether or not sync
   completed. `setSystemTimeFromRtc()` (`RTC_Class.cpp`) reads the RTC's
   digits as UTC (it forces `TZ=GMT0` around its `mktime()`), but the RTC
@@ -357,6 +372,20 @@ these were found are in `notes/writeup-material.md`.
   by `parseLocal()`/`parseIso()`. A Wi-Fi-failure cycle already runs in that
   frame (it never calls `configTzTime()`), and `sleepUntilNext()` schedules
   from the RTC's own digits, so the wake alarm is unaffected either way.
+  **`b9607a8` shipped a bug of its own, caught on hardware 2026-09-28:** it
+  read `sntp_get_sync_status()` twice -- once in the wait loop, then again
+  in the `if` -- and the read-once rule above made the second call return
+  RESET after every successful sync. So every normal boot took the
+  "not synced" branch: `sntp_stop()`, `FAIL_CLOCK`, and `TZ=UTC0` on a
+  clock SNTP had *already* corrected to true UTC. The panel showed a
+  yellow `NO TIME SYNC` header with the time ~7 h ahead (22:49 at 15:49
+  PDT), and the log showed `ntp failed` only ~3 s after `BATLOG` and
+  `WINDSRC src=fcst reason=stale age_min=427` (the offset made the
+  observed reading look 7 h old). The RTC wasn't corrupted, because the
+  write-back was skipped. Fixed by reading the status once into
+  `sntpStatus`. Nothing in the test ladder could see it: the SDL build and
+  the Tier 1 harness never run the real sync, and the planned
+  provoked-failure test only exercises the failure path.
 - **Always set `tm_isdst = -1` before `mktime()`.** `struct tm nextTm = {}`
   in `sleepUntilNext()` left it 0 ("standard time"). `TZ_STRING` is
   `PST8PDT,M3.2.0,M11.1.0`; during PDT (UTC-7), `mktime()` then read the

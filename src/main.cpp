@@ -834,13 +834,20 @@ void setup() {
     // ESP-IDF SNTP sync status instead. Confirmed by reading
     // esp32-hal-time.c, M5Unified.cpp, RTC_Class.cpp and esp_sntp.h,
     // 2026-08-30.
+    //
+    // sntp_get_sync_status() is read-once: after returning COMPLETED it resets
+    // itself to RESET (esp_sntp.h). So poll it exactly once per iteration and
+    // keep the result -- a second call after the loop reads RESET even when the
+    // sync just succeeded, which is what b9607a8 did (caught on hardware,
+    // 2026-09-28: every good sync was taken for a failure).
     uint32_t sntpStart = millis();
-    while (sntp_get_sync_status() != SNTP_SYNC_STATUS_COMPLETED &&
+    sntp_sync_status_t sntpStatus;
+    while ((sntpStatus = sntp_get_sync_status()) != SNTP_SYNC_STATUS_COMPLETED &&
            millis() - sntpStart < 10000) {
       delay(50);
     }
 
-    if (sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED) {
+    if (sntpStatus == SNTP_SYNC_STATUS_COMPLETED) {
       struct tm lt;
       if (getLocalTime(&lt, 1000)) {
         // The RX8130 alarm in sleepUntilNext() schedules by its own clock, so
