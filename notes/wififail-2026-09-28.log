@@ -1,0 +1,56 @@
+2026-09-28 20:44:14.248 | # logger started; waiting for 303A:1001
+2026-09-28 20:44:14.266 | # connected to COM4
+2026-09-28 20:44:30.005 | [ 17151][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 20:45:03.427 | [ 50581][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 20:45:03.439 | [ 50592][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 20:45:03.994 | M5.begin() took 50380 ms
+2026-09-28 20:45:04.000 | [I][M5PM1_SYS] Device: ID=0x50 MODEL=0x20 HW=0x05 SW=0x53(S)
+2026-09-28 20:45:04.011 | [I][M5PM1_I2C] I2C config set and verified: sleep=0, speed=100K
+2026-09-28 20:45:04.046 | [I][M5PM1_I2C] M5PM1 initialized at address 0x6E (I2C: 100000 Hz)
+2026-09-28 20:45:04.125 | [I][M5PM1_SYS] RTC_RAM write and verified: offset=0, length=4
+2026-09-28 20:45:04.125 | 
+2026-09-28 20:45:04.125 | === cycle 14 ===
+2026-09-28 20:45:04.135 | BATLOG cycle=14 level=100% vbat_mv=4184
+2026-09-28 20:45:06.634 | [ 53782][W][WiFiGeneric.cpp:1062] _eventCallback(): Reason: 201 - NO_AP_FOUND
+2026-09-28 20:45:09.055 | [ 56202][W][WiFiGeneric.cpp:1062] _eventCallback(): Reason: 201 - NO_AP_FOUND
+2026-09-28 20:45:11.472 | [ 58621][W][WiFiGeneric.cpp:1062] _eventCallback(): Reason: 201 - NO_AP_FOUND
+2026-09-28 20:45:13.890 | [ 61041][W][WiFiGeneric.cpp:1062] _eventCallback(): Reason: 201 - NO_AP_FOUND
+2026-09-28 20:45:16.307 | [ 63460][W][WiFiGeneric.cpp:1062] _eventCallback(): Reason: 201 - NO_AP_FOUND
+2026-09-28 20:45:18.733 | [ 65880][W][WiFiGeneric.cpp:1062] _eventCallback(): Reason: 201 - NO_AP_FOUND
+2026-09-28 20:45:21.150 | [ 68299][W][WiFiGeneric.cpp:1062] _eventCallback(): Reason: 201 - NO_AP_FOUND
+2026-09-28 20:45:23.567 | [ 70719][W][WiFiGeneric.cpp:1062] _eventCallback(): Reason: 201 - NO_AP_FOUND
+2026-09-28 20:45:24.227 | WIFIFAIL status=WL_NO_SSID_AVAIL(1) reason=201(NO_AP_FOUND) elapsed_ms=20000
+2026-09-28 20:45:31.028 | WIFISCAN ssid="<redacted>" ch=5 rssi=-52 target=0
+2026-09-28 20:45:31.028 | WIFISCAN ssid="<redacted>" ch=6 rssi=-56 target=0
+2026-09-28 20:45:31.028 | WIFISCAN ssid="<redacted>" ch=10 rssi=-56 target=0
+2026-09-28 20:45:31.028 | WIFISCAN ssid="<redacted>" ch=5 rssi=-57 target=0
+2026-09-28 20:45:31.028 | WIFISCAN ssid="<redacted>" ch=11 rssi=-62 target=0
+2026-09-28 20:45:31.028 | WIFISCAN ssid="<redacted>" ch=3 rssi=-66 target=0
+2026-09-28 20:45:31.028 | WIFISCAN ssid="<redacted>" ch=6 rssi=-66 target=0
+2026-09-28 20:45:31.038 | WIFISCAN ssid="<redacted>" ch=1 rssi=-67 target=0
+2026-09-28 20:45:31.038 | WIFISCAN ssid="<redacted>" ch=3 rssi=-67 target=0
+2026-09-28 20:45:31.038 | WIFISCAN ssid="<redacted>" ch=3 rssi=-68 target=0
+2026-09-28 20:45:31.038 | WIFISCAN ssid="<redacted>" ch=3 rssi=-68 target=0
+2026-09-28 20:45:31.038 | WIFISCAN ssid="<redacted>" ch=3 rssi=-68 target=0
+2026-09-28 20:45:31.038 | WIFISCAN ssid="<redacted>" ch=1 rssi=-69 target=0
+2026-09-28 20:45:31.038 | WIFISCAN ssid="<redacted>" ch=1 rssi=-69 target=0
+2026-09-28 20:45:31.038 | WIFISCAN ssid="<redacted>" ch=11 rssi=-70 target=0
+2026-09-28 20:45:31.038 | WIFISCAN ssid="<redacted>" ch=1 rssi=-71 target=0
+2026-09-28 20:45:31.038 | WIFISCAN ssid="<redacted>" ch=6 rssi=-74 target=0
+2026-09-28 20:45:31.038 | WIFISCAN ssid="<redacted>" ch=11 rssi=-74 target=0
+2026-09-28 20:45:31.038 | WIFISCAN ssid="<redacted>" ch=3 rssi=-80 target=0
+2026-09-28 20:45:31.038 | WIFISCAN ssid="<redacted>" ch=6 rssi=-81 target=0
+2026-09-28 20:45:31.038 | WIFISCAN ssid="<redacted>" ch=6 rssi=-82 target=0
+2026-09-28 20:45:31.038 | WIFISCAN ssid="<redacted>" ch=6 rssi=-83 target=0
+2026-09-28 20:45:31.038 | WIFISCAN ssid="<redacted>" ch=6 rssi=-88 target=0
+2026-09-28 20:45:31.038 | WIFISCAN ssid="<redacted>" ch=6 rssi=-89 target=0
+2026-09-28 20:45:31.038 | WIFISCAN ssid="<redacted>" ch=11 rssi=-89 target=0
+2026-09-28 20:45:31.038 | WIFISCAN ssid="<redacted>" ch=11 rssi=-91 target=0
+2026-09-28 20:45:31.038 | WIFISCAN ssid="<redacted>" ch=11 rssi=-93 target=0
+2026-09-28 20:45:31.038 | WIFISCAN ssid="<redacted>" ch=1 rssi=-95 target=0
+2026-09-28 20:45:31.038 | WIFISCAN done count=28 target_seen=0
+2026-09-28 20:45:31.038 | wifi failed
+2026-09-28 20:45:31.044 | canvas: 400x600 @ palette_4bit = 120000 bytes, heap before=278512 after=278448 (used=64)
+2026-09-28 20:45:47.841 | [I][M5PM1_GPIO] GPIO2 Wake Enabled
+2026-09-28 20:45:47.866 | [I][M5PM1_PWR] Shutdown requested
+2026-09-28 20:45:48.046 | # port COM4 gone (SerialException); waiting again

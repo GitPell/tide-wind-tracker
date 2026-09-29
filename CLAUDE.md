@@ -81,13 +81,17 @@ ended; the measured battery figure is for `237ef2f`, which has none of these):
   ~15.5 s per battery wake; see "Verified corrections" -> USB serial.
   Confirmed indirectly on battery 2026-09-28 (66 s wake-to-refresh).
 - Wi-Fi failure diagnostics (`d237a73`) -- see "Serial log lines".
-- Time-sync failure handling (`b9607a8`, plus the read-once fix) -- found by reading the code, never
-  observed; see "Verified corrections" -> Time.
+  **Confirmed on hardware 2026-09-28** by a provoked `NO_AP_FOUND` (see
+  the checklist).
+- Time-sync failure handling (`b9607a8`, plus the read-once fix) -- found
+  by reading the code. **Confirmed on hardware 2026-09-28** by a provoked
+  sync failure (see the checklist); see "Verified corrections" -> Time.
 - Error display (`fd2298b`) -- see "Design constraints". Device goldens
   for its five fixtures are committed (`ded675c`), and the yellow `NO TIME
   SYNC` header appeared on the real panel during the 2026-09-28
-  double-read bug. The production failure paths (Wi-Fi down, fetches
-  failing) still await the provoked-failure tests below.
+  double-read bug. The provoked Wi-Fi failure showed the red `NO WIFI`
+  header with `NO_AP_FOUND` on the panel (2026-09-28). Fetch failures with
+  Wi-Fi up haven't been provoked on hardware.
 
 **Open items:**
 1. Wi-Fi `NO_AP_FOUND` still unresolved. The diagnostics above are built but
@@ -173,15 +177,32 @@ baseline timing, which only needs watching.
       (missed). 2026-09-28 20:12 wake, `637033c`: **66 s**, hand-timed
       from the alarm minute to the first flicker. With the 15.5 s serial
       wait it would be about 78 s, so the wait is gone on battery.
-- [ ] Provoke a Wi-Fi failure with a nonexistent `WIFI_SSID` (see "Serial
+- [x] Provoke a Wi-Fi failure with a nonexistent `WIFI_SSID` (see "Serial
       log lines"), confirm the `WIFIFAIL`/`WIFISCAN` lines appear as
-      expected, then restore `config.h` and reflash.
-- [ ] Provoke a time-sync failure: a test build whose `configTzTime()`
+      expected, then restore `config.h` and reflash. 2026-09-28 20:45,
+      `637033c` with only `WIFI_SSID` changed: `WIFIFAIL
+      status=WL_NO_SSID_AVAIL(1) reason=201(NO_AP_FOUND)
+      elapsed_ms=20000`, 28 `WIFISCAN` lines, `done count=28
+      target_seen=0`, `wifi failed`; the panel showed the red `NO WIFI`
+      header with `NO_AP_FOUND`. Log with SSIDs redacted (channel, RSSI
+      and target kept): `notes/wififail-2026-09-28.log`. `config.h`
+      restored byte for byte (hash checked), production reflashed 20:50,
+      normal boot confirmed: no `ntp failed`, `src=obs`, blue header with
+      the correct time.
+- [x] Provoke a time-sync failure: a test build whose `configTzTime()`
       call points at a nonexistent NTP server, so Wi-Fi still connects
       but SNTP never completes. Expect the `ntp failed: not synced in 10s,
       using RTC time` line and a correct header time. On the next normal
       cycle, the header time must still be correct (the RTC wasn't
-      corrupted). Then restore and reflash.
+      corrupted). Then restore and reflash. 2026-09-28 21:02, `637033c`
+      with `configTzTime()` pointed at `ntp.invalid` (temporary,
+      uncommitted): `ntp failed: not synced in 10s, using RTC time`
+      11.5 s after `BATLOG` (the full 10 s wait, unlike the bug's ~3 s),
+      then `WINDSRC src=obs reason=ok age_min=8`; the panel showed the
+      yellow `NO TIME SYNC` header at 21:02 with footer `UPD 21:02`
+      (correct time). `main.cpp` restored from git, production reflashed
+      21:07; the 21:08 boot (cycle 17): no `ntp failed`, `src=obs`, blue
+      header with the correct time, so the RTC wasn't corrupted.
 
 ---
 
@@ -380,8 +401,8 @@ these were found are in `notes/writeup-material.md`.
   It is called only in `setup()`'s NTP wait (`sntpStatus`); no pinned
   library calls it. Found on hardware, 2026-09-28 (see the next entry).
 - **Don't write an unsynced clock back to the RTC** (found by reading the
-  code, 2026-09-24; the failure path itself is still not observed on
-  hardware). After the 10s
+  code, 2026-09-24; the failure path confirmed on hardware by a provoked
+  sync failure, 2026-09-28). After the 10s
   poll, `setup()` used to write the clock to the RTC whether or not sync
   completed. `setSystemTimeFromRtc()` (`RTC_Class.cpp`) reads the RTC's
   digits as UTC (it forces `TZ=GMT0` around its `mktime()`), but the RTC
@@ -664,7 +685,8 @@ One grep-able line per event, visible only with a USB host attached (see
 
 - `WIFIFAIL`'s reason comes from an `ARDUINO_EVENT_WIFI_STA_DISCONNECTED`
   handler. The success path only pays for registering it; the failure path
-  adds an active scan, ~1.5-4s (framework cap 10s). Scan lines include
+  adds an active scan: ~1.5-4s estimated, **~6.8s observed** with 28
+  networks visible (2026-09-28), under the framework's 10s cap. Scan lines include
   neighbors' SSIDs -- check a log before pasting it anywhere public.
 - Also: `ntp failed: not synced in 10s, using RTC time` on a time-sync
   failure, and `tides=%d wind=%d events=%d` after the fetches.
