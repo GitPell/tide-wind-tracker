@@ -75,6 +75,7 @@ toward it.
 ended; the measured battery figure is for `237ef2f`, which has none of these):
 - Observed wind from NOAA, with Open-Meteo fallback (`6d5d443`) -- see
   "Data sources". Adds an estimated 1-2 s awake per cycle (unmeasured).
+  **Confirmed on hardware 2026-09-28:** `src=obs` in 7 of 7 cycles.
 - Skipping the USB serial wait when no host is attached (`5c5c8ba`) -- saves
   ~15.5 s per battery wake; see "Verified corrections" -> USB serial.
 - Wi-Fi failure diagnostics (`d237a73`) -- see "Serial log lines".
@@ -119,18 +120,29 @@ baseline timing, which only needs watching.
       `UPD 15:18`, both correct. That boot synced NTP before drawing, so it
       shows the header right after a sync; it doesn't show whether the RTC
       itself kept time through the discharge.
-- [ ] Flash the current firmware (`pio run -e m5stack-papercolor -t upload
+- [x] Flash the current firmware (`pio run -e m5stack-papercolor -t upload
       --upload-port COMx`). The battery charges over USB meanwhile.
-- [ ] With the monitor attached from boot: the log starts at the first
+      `6dfc08a` flashed 2026-09-28 15:48 and exposed the
+      `sntp_get_sync_status()` double read; `637033c` (the fix) flashed
+      16:03.
+- [x] With the monitor attached from boot: the log starts at the first
       line as before (the serial wait still runs with a host), and the
       first few `WINDSRC` lines show `src=obs`. First try, `6dfc08a`,
       2026-09-28 15:49 (`notes/newfw-firstboot-2026-09-28.log`): the log
       started as expected, but `WINDSRC src=fcst reason=stale
       age_min=427` -- caused by the `sntp_get_sync_status()` double read
       (see "Verified corrections" -> Time), not by the wind code.
-- [ ] Normal-boot success path, after flashing the read-once fix: no
+      Second try, `637033c`, 16:04-19:11
+      (`notes/fix-firstboot-2026-09-28.log`): the log started as expected
+      and every cycle showed `src=obs`.
+- [x] Normal-boot success path, after flashing the read-once fix: no
       `ntp failed` line in the log, a blue header with the correct local
-      time, and `WINDSRC src=obs`.
+      time, and `WINDSRC src=obs`. `637033c`, 2026-09-28: 7 cycles on USB
+      (16:04-19:11) with no `ntp failed`, `WINDSRC src=obs reason=ok`
+      (ages 5-10 min) every time, `M5.begin()` 50.4-50.5 s, ~31 min
+      cadence; header and footer confirmed correct on the panel. The
+      19:41 wake ran on battery after unplugging (panel `UPD 19:42`), so
+      it isn't in the log.
 - [ ] Flash `m5stack-papercolor-test`. First capture goldens for the new
       fixtures (`fail_wifi`, `fail_all`, `fail_wind`, `fail_hilo`,
       `fail_clock`): `python tools/hil.py render test/fixtures/<name>.json

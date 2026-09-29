@@ -1,0 +1,137 @@
+2026-09-28 16:03:42.756 | # logger started; waiting for 303A:1001
+2026-09-28 16:03:42.765 | # connected to COM4
+2026-09-28 16:03:59.267 | [ 17143][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 16:04:32.679 | [ 50555][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 16:04:32.689 | [ 50566][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 16:04:33.238 | M5.begin() took 50355 ms
+2026-09-28 16:04:33.253 | [I][M5PM1_SYS] Device: ID=0x50 MODEL=0x20 HW=0x05 SW=0x53(S)
+2026-09-28 16:04:33.258 | [I][M5PM1_I2C] I2C config set and verified: sleep=0, speed=100K
+2026-09-28 16:04:33.296 | [I][M5PM1_I2C] M5PM1 initialized at address 0x6E (I2C: 100000 Hz)
+2026-09-28 16:04:33.376 | [I][M5PM1_SYS] RTC_RAM write and verified: offset=0, length=4
+2026-09-28 16:04:33.376 | 
+2026-09-28 16:04:33.376 | === cycle 3 ===
+2026-09-28 16:04:33.388 | BATLOG cycle=3 level=50% vbat_mv=3704
+2026-09-28 16:04:44.841 | WINDSRC src=obs reason=ok age_min=10
+2026-09-28 16:04:44.842 | tides=1 wind=1 events=8
+2026-09-28 16:04:44.845 | canvas: 400x600 @ palette_4bit = 120000 bytes, heap before=276340 after=276480 (used=-140)
+2026-09-28 16:05:01.599 | [ 79476][W][WiFiGeneric.cpp:1062] _eventCallback(): Reason: 8 - ASSOC_LEAVE
+2026-09-28 16:05:01.708 | [I][M5PM1_GPIO] GPIO2 Wake Enabled
+2026-09-28 16:05:01.729 | [I][M5PM1_PWR] Shutdown requested
+2026-09-28 16:05:01.855 | # port COM4 gone (SerialException); waiting again
+2026-09-28 16:35:01.240 | # connected to COM4
+2026-09-28 16:35:18.104 | [ 17189][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 16:35:51.607 | [ 50690][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 16:35:51.618 | [ 50701][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 16:35:52.166 | M5.begin() took 50490 ms
+2026-09-28 16:35:52.182 | [I][M5PM1_SYS] Device: ID=0x50 MODEL=0x20 HW=0x05 SW=0x53(S)
+2026-09-28 16:35:52.185 | [I][M5PM1_I2C] I2C config set and verified: sleep=0, speed=100K
+2026-09-28 16:35:52.223 | [I][M5PM1_I2C] M5PM1 initialized at address 0x6E (I2C: 100000 Hz)
+2026-09-28 16:35:52.304 | [I][M5PM1_SYS] RTC_RAM write and verified: offset=0, length=4
+2026-09-28 16:35:52.304 | 
+2026-09-28 16:35:52.304 | === cycle 4 ===
+2026-09-28 16:35:52.317 | BATLOG cycle=4 level=64% vbat_mv=3812
+2026-09-28 16:36:00.112 | WINDSRC src=obs reason=ok age_min=6
+2026-09-28 16:36:00.112 | tides=1 wind=1 events=8
+2026-09-28 16:36:00.116 | canvas: 400x600 @ palette_4bit = 120000 bytes, heap before=276320 after=276464 (used=-144)
+2026-09-28 16:36:16.915 | [ 75999][W][WiFiGeneric.cpp:1062] _eventCallback(): Reason: 8 - ASSOC_LEAVE
+2026-09-28 16:36:17.023 | [I][M5PM1_GPIO] GPIO2 Wake Enabled
+2026-09-28 16:36:17.044 | [I][M5PM1_PWR] Shutdown requested
+2026-09-28 16:36:17.171 | # port COM4 gone (SerialException); waiting again
+2026-09-28 16:36:17.178 | # open COM4 failed: could not open port 'COM4': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2); retrying
+2026-09-28 17:06:00.596 | # connected to COM4
+2026-09-28 17:06:17.461 | [ 17189][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 17:06:50.961 | [ 50690][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 17:06:50.971 | [ 50701][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 17:06:51.519 | M5.begin() took 50490 ms
+2026-09-28 17:06:51.536 | [I][M5PM1_SYS] Device: ID=0x50 MODEL=0x20 HW=0x05 SW=0x53(S)
+2026-09-28 17:06:51.539 | [I][M5PM1_I2C] I2C config set and verified: sleep=0, speed=100K
+2026-09-28 17:06:51.579 | [I][M5PM1_I2C] M5PM1 initialized at address 0x6E (I2C: 100000 Hz)
+2026-09-28 17:06:51.653 | [I][M5PM1_SYS] RTC_RAM write and verified: offset=0, length=4
+2026-09-28 17:06:51.653 | 
+2026-09-28 17:06:51.653 | === cycle 5 ===
+2026-09-28 17:06:51.665 | BATLOG cycle=5 level=82% vbat_mv=3960
+2026-09-28 17:07:03.073 | WINDSRC src=obs reason=ok age_min=7
+2026-09-28 17:07:03.073 | tides=1 wind=1 events=8
+2026-09-28 17:07:03.083 | canvas: 400x600 @ palette_4bit = 120000 bytes, heap before=276532 after=276468 (used=64)
+2026-09-28 17:07:19.883 | [ 79611][W][WiFiGeneric.cpp:1062] _eventCallback(): Reason: 8 - ASSOC_LEAVE
+2026-09-28 17:07:19.991 | [I][M5PM1_GPIO] GPIO2 Wake Enabled
+2026-09-28 17:07:20.011 | [I][M5PM1_PWR] Shutdown requested
+2026-09-28 17:07:20.137 | # port COM4 gone (SerialException); waiting again
+2026-09-28 17:37:00.637 | # connected to COM4
+2026-09-28 17:37:00.638 | [   265][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 17:37:00.648 | [   274][I][M5GFX.cpp:2227] autodetect(): [M5GFX] [Autodetect] board_M5PaperColor
+2026-09-28 17:37:17.562 | [ 17189][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 17:37:51.063 | [ 50690][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 17:37:51.073 | [ 50701][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 17:37:51.623 | M5.begin() took 50490 ms
+2026-09-28 17:37:51.638 | [I][M5PM1_SYS] Device: ID=0x50 MODEL=0x20 HW=0x05 SW=0x53(S)
+2026-09-28 17:37:51.641 | [I][M5PM1_I2C] I2C config set and verified: sleep=0, speed=100K
+2026-09-28 17:37:51.680 | [I][M5PM1_I2C] M5PM1 initialized at address 0x6E (I2C: 100000 Hz)
+2026-09-28 17:37:51.761 | [I][M5PM1_SYS] RTC_RAM write and verified: offset=0, length=4
+2026-09-28 17:37:51.761 | 
+2026-09-28 17:37:51.761 | === cycle 6 ===
+2026-09-28 17:37:51.773 | BATLOG cycle=6 level=92% vbat_mv=4040
+2026-09-28 17:38:04.091 | WINDSRC src=obs reason=ok age_min=8
+2026-09-28 17:38:04.091 | tides=1 wind=1 events=8
+2026-09-28 17:38:04.095 | canvas: 400x600 @ palette_4bit = 120000 bytes, heap before=276528 after=276464 (used=64)
+2026-09-28 17:38:20.892 | [ 80521][W][WiFiGeneric.cpp:1062] _eventCallback(): Reason: 8 - ASSOC_LEAVE
+2026-09-28 17:38:21.022 | [I][M5PM1_GPIO] GPIO2 Wake Enabled
+2026-09-28 17:38:21.042 | [I][M5PM1_PWR] Shutdown requested
+2026-09-28 17:38:21.169 | # port COM4 gone (SerialException); waiting again
+2026-09-28 18:08:00.701 | # connected to COM4
+2026-09-28 18:08:17.600 | [ 17188][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 18:08:51.101 | [ 50689][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 18:08:51.111 | [ 50700][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 18:08:51.661 | M5.begin() took 50489 ms
+2026-09-28 18:08:51.676 | [I][M5PM1_SYS] Device: ID=0x50 MODEL=0x20 HW=0x05 SW=0x53(S)
+2026-09-28 18:08:51.679 | [I][M5PM1_I2C] I2C config set and verified: sleep=0, speed=100K
+2026-09-28 18:08:51.718 | [I][M5PM1_I2C] M5PM1 initialized at address 0x6E (I2C: 100000 Hz)
+2026-09-28 18:08:51.799 | [I][M5PM1_SYS] RTC_RAM write and verified: offset=0, length=4
+2026-09-28 18:08:51.799 | 
+2026-09-28 18:08:51.799 | === cycle 7 ===
+2026-09-28 18:08:51.811 | BATLOG cycle=7 level=100% vbat_mv=4144
+2026-09-28 18:09:03.787 | WINDSRC src=obs reason=ok age_min=9
+2026-09-28 18:09:03.787 | tides=1 wind=1 events=8
+2026-09-28 18:09:03.791 | canvas: 400x600 @ palette_4bit = 120000 bytes, heap before=276328 after=276472 (used=-144)
+2026-09-28 18:09:20.590 | [ 80179][W][WiFiGeneric.cpp:1062] _eventCallback(): Reason: 8 - ASSOC_LEAVE
+2026-09-28 18:09:20.698 | [I][M5PM1_GPIO] GPIO2 Wake Enabled
+2026-09-28 18:09:20.716 | [I][M5PM1_PWR] Shutdown requested
+2026-09-28 18:09:20.839 | # port COM4 gone (SerialException); waiting again
+2026-09-28 18:39:02.402 | # connected to COM4
+2026-09-28 18:39:17.189 | [ 17189][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 18:39:50.690 | [ 50690][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 18:39:50.701 | [ 50701][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 18:39:51.250 | M5.begin() took 50490 ms
+2026-09-28 18:39:51.264 | [I][M5PM1_SYS] Device: ID=0x50 MODEL=0x20 HW=0x05 SW=0x53(S)
+2026-09-28 18:39:51.268 | [I][M5PM1_I2C] I2C config set and verified: sleep=0, speed=100K
+2026-09-28 18:39:51.306 | [I][M5PM1_I2C] M5PM1 initialized at address 0x6E (I2C: 100000 Hz)
+2026-09-28 18:39:51.388 | [I][M5PM1_SYS] RTC_RAM write and verified: offset=0, length=4
+2026-09-28 18:39:51.388 | 
+2026-09-28 18:39:51.388 | === cycle 8 ===
+2026-09-28 18:39:51.400 | BATLOG cycle=8 level=100% vbat_mv=4218
+2026-09-28 18:40:03.770 | WINDSRC src=obs reason=ok age_min=10
+2026-09-28 18:40:03.770 | tides=1 wind=1 events=8
+2026-09-28 18:40:03.774 | canvas: 400x600 @ palette_4bit = 120000 bytes, heap before=276528 after=276464 (used=64)
+2026-09-28 18:40:20.573 | [ 80574][W][WiFiGeneric.cpp:1062] _eventCallback(): Reason: 8 - ASSOC_LEAVE
+2026-09-28 18:40:20.702 | [I][M5PM1_GPIO] GPIO2 Wake Enabled
+2026-09-28 18:40:20.722 | [I][M5PM1_PWR] Shutdown requested
+2026-09-28 18:40:20.848 | # port COM4 gone (SerialException); waiting again
+2026-09-28 19:10:00.339 | # connected to COM4
+2026-09-28 19:10:17.200 | [ 17189][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 19:10:50.700 | [ 50690][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 19:10:50.711 | [ 50701][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=3 scl=2 freq=100000
+2026-09-28 19:10:51.260 | M5.begin() took 50490 ms
+2026-09-28 19:10:51.276 | [I][M5PM1_SYS] Device: ID=0x50 MODEL=0x20 HW=0x05 SW=0x53(S)
+2026-09-28 19:10:51.279 | [I][M5PM1_I2C] I2C config set and verified: sleep=0, speed=100K
+2026-09-28 19:10:51.317 | [I][M5PM1_I2C] M5PM1 initialized at address 0x6E (I2C: 100000 Hz)
+2026-09-28 19:10:51.398 | [I][M5PM1_SYS] RTC_RAM write and verified: offset=0, length=4
+2026-09-28 19:10:51.398 | 
+2026-09-28 19:10:51.398 | === cycle 9 ===
+2026-09-28 19:10:51.411 | BATLOG cycle=9 level=100% vbat_mv=4236
+2026-09-28 19:11:03.452 | WINDSRC src=obs reason=ok age_min=5
+2026-09-28 19:11:03.452 | tides=1 wind=1 events=8
+2026-09-28 19:11:03.456 | canvas: 400x600 @ palette_4bit = 120000 bytes, heap before=276540 after=276464 (used=76)
+2026-09-28 19:11:20.254 | [ 80245][W][WiFiGeneric.cpp:1062] _eventCallback(): Reason: 8 - ASSOC_LEAVE
+2026-09-28 19:11:20.364 | [I][M5PM1_GPIO] GPIO2 Wake Enabled
+2026-09-28 19:11:20.384 | [I][M5PM1_PWR] Shutdown requested
+2026-09-28 19:11:20.512 | # port COM4 gone (SerialException); waiting again
