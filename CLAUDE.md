@@ -78,6 +78,7 @@ ended; the measured battery figure is for `237ef2f`, which has none of these):
   **Confirmed on hardware 2026-09-28:** `src=obs` in 7 of 7 cycles.
 - Skipping the USB serial wait when no host is attached (`5c5c8ba`) -- saves
   ~15.5 s per battery wake; see "Verified corrections" -> USB serial.
+  Confirmed indirectly on battery 2026-09-28 (66 s wake-to-refresh).
 - Wi-Fi failure diagnostics (`d237a73`) -- see "Serial log lines".
 - Time-sync failure handling (`b9607a8`, plus the read-once fix) -- found by reading the code, never
   observed; see "Verified corrections" -> Time.
@@ -155,11 +156,13 @@ baseline timing, which only needs watching.
       (`SDL_PREVIEW_DUMP_RAW` + `hil.py decode-raw --golden`). That
       completes DONE.md's "SDL byte-identical for every fixture" item; the
       original five already match (see "Status").
-- [ ] Unplugged, on battery: time wake-to-refresh on the new firmware and
+- [x] Unplugged, on battery: time wake-to-refresh on the new firmware and
       compare with the source-based expectation (~62 s: ~51 s `M5.begin()`,
       ~10.5 s Wi-Fi + fetch, ~1-2 s observed wind; `237ef2f` would have
       added the ~15.5 s serial wait). No before measurement exists
-      (missed).
+      (missed). 2026-09-28 20:12 wake, `637033c`: **66 s**, hand-timed
+      from the alarm minute to the first flicker. With the 15.5 s serial
+      wait it would be about 78 s, so the wait is gone on battery.
 - [ ] Provoke a Wi-Fi failure with a nonexistent `WIFI_SSID` (see "Serial
       log lines"), confirm the `WIFIFAIL`/`WIFISCAN` lines appear as
       expected, then restore `config.h` and reflash.
@@ -579,7 +582,13 @@ days per charge** on `237ef2f` -- about 37-39% of the goal.
   `M5.begin()`, ~10.5 s Wi-Fi + fetch, ~17 s render + refresh) -- about 4x
   the original ~20 s assumption. On battery `237ef2f` also sat out the
   ~15.5 s USB serial wait, so ~93 s. Observed wind will add ~1-2 s and the
-  serial-wait fix remove ~15.5 s.
+  serial-wait fix remove ~15.5 s. On `637033c`, on battery (2026-09-28):
+  66 s from the alarm minute to the refresh starting (one hand-timed wake),
+  plus the ~17 s refresh, so roughly 83 s per wake -- arithmetic, not a
+  measurement. **Don't use the ~83 s figure to project days per charge
+  for `637033c`:** awake current differs by phase, and there's no
+  measurement for this firmware. The README and write-up keep "should
+  last longer; not measured".
 - **Energy split (rough, gauge-dependent):** 54% of 1250mAh ≈ 675mAh over
   8.24 days = ~82mAh/day, ~1.8mAh/cycle. Datasheet standby (~2.2mAh/day) is
   under 3% of that, so ~97% of daily energy is awake time: ~1.75mAh per ~93s
