@@ -10,10 +10,10 @@ This file defines when the project is finished. Anything not listed here is out 
 
 - [x] Wake cadence verified on hardware: 31.7 min/cycle average over 375 cycles (soak 2, 2026-09-16 to 2026-09-24) after the `tm_isdst` fix (see CLAUDE.md, notes/soak-2026-09-11.md)
 - [x] No hang on failure: every wait is bounded (Wi-Fi 20s, time sync 10s, fixed hilo retries; per HTTP request: DNS ~14s, TCP connect 5s, TLS handshake 120s on `237ef2f` (the measured firmware) and 15s after the observed-wind change (5s for the wind request), 15s between received bytes) and setup always reaches `drawAll()` and `sleepUntilNext()` (audit 2026-09-24)
-- [ ] A battery wake does not wait for a USB serial connection (verify `main.cpp` serial wait behavior without USB; fix if it waits)
-- [ ] Wi-Fi failures are diagnosable: `connectWifi()` logs the status code, disconnect reason, and visible networks on failure; the cause of `NO_AP_FOUND` is identified or documented
-- [ ] A failed fetch renders an explicit error state, never plausible-looking default values (e.g. 0 kn, 0.0 ft), covered by a fixture and golden
-- [ ] Observed wind resolved: either implemented per "Data sources", or CLAUDE.md records Open-Meteo-only as deliberate, with the reason
+- [x] A battery wake does not wait for a USB serial connection (verify `main.cpp` serial wait behavior without USB; fix if it waits) (`5c5c8ba`; 66 s wake-to-refresh on battery 2026-09-28, vs ~78 s with the wait)
+- [x] Wi-Fi failures are diagnosable: `connectWifi()` logs the status code, disconnect reason, and visible networks on failure; the cause of `NO_AP_FOUND` is identified or documented (`d237a73`, confirmed by a provoked `NO_AP_FOUND` 2026-09-28; the original failures' cause documented as unknown in CLAUDE.md, Open item 1)
+- [x] A failed fetch renders an explicit error state, never plausible-looking default values (e.g. 0 kn, 0.0 ft), covered by a fixture and golden (`fd2298b`; five failure fixtures, goldens `ded675c`, `test --all` 10/10 2026-09-28)
+- [x] Observed wind resolved: either implemented per "Data sources", or CLAUDE.md records Open-Meteo-only as deliberate, with the reason (implemented, `6d5d443`; `src=obs` on hardware 2026-09-28)
 - [x] Days per charge measured by the baseline run-to-empty ("empty" = device no longer completes a wake cycle; last completed cycle bracketed by evidence (the cycle counter did not survive the full discharge)), entered in the CLAUDE.md battery budget, and compared to the ~1 month design goal. The shortfall (projected ~15 days) is documented as a known limitation. The firmware version measured is stated, along with any later change that affects awake time (11.0-11.7 days on `237ef2f`: last confirmed completed cycle 2026-09-27 15:23, found dead 2026-09-28 ~08:00)
 
 ## 2. Reproducible from a clean clone
@@ -35,7 +35,7 @@ This file defines when the project is finished. Anything not listed here is out 
 
 - [x] Git history scanned for credentials: `src/config.h` never tracked; only placeholder Wi-Fi values committed; NOAA and Open-Meteo need no API keys (audit 2026-09-24)
 - [x] LICENSE file added (`2602686`)
-- [ ] Commit author emails (all noreply, verified) and station/location choice confirmed intentional by Chris
+- [x] Commit author emails (all noreply, verified) and station/location choice confirmed intentional by Chris (every author, committer and tagger is `20117816+GitPell@users.noreply.github.com`, checked 2026-09-28; station 9414290 confirmed by Chris 2026-09-28)
 
 ## 5. Documented
 

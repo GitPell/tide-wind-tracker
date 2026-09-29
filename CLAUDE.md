@@ -72,8 +72,8 @@ toward it.
   original five 2026-09-24, rechecked on the pinned M5GFX 2026-09-25; the
   five failure fixtures 2026-09-28).
 
-**Built, not yet on hardware** (ready to flash now that the run-to-empty has
-ended; the measured battery figure is for `237ef2f`, which has none of these):
+**Added after `237ef2f`, confirmed on hardware 2026-09-28** (the measured
+battery figure is for `237ef2f`, which has none of these):
 - Observed wind from NOAA, with Open-Meteo fallback (`6d5d443`) -- see
   "Data sources". Adds an estimated 1-2 s awake per cycle (unmeasured).
   **Confirmed on hardware 2026-09-28:** `src=obs` in 7 of 7 cycles.
@@ -94,9 +94,10 @@ ended; the measured battery figure is for `237ef2f`, which has none of these):
   Wi-Fi up haven't been provoked on hardware.
 
 **Open items:**
-1. Wi-Fi `NO_AP_FOUND` still unresolved. The diagnostics above are built but
-   not flashed; the cause still has to be identified from a real
-   occurrence, or documented as unknown, per DONE.md.
+1. Wi-Fi `NO_AP_FOUND`: cause unknown, closed as documented per DONE.md.
+   The diagnostics are on hardware and the panel shows the reason on
+   battery. The original failures' cause was never caught and remains
+   unknown.
 2. Current draw is unmeasured (the 92.53 uA standby and ~150 mA awake
    figures are datasheet/arithmetic). The run-to-empty measured
    days-per-charge directly, so a current measurement is only needed to
@@ -166,10 +167,11 @@ baseline timing, which only needs watching.
       goldens captured and reviewed, committed as `ded675c`; all five
       byte-identical to their SDL renders; `test --all` 10/10 at 20:33;
       `m5stack-papercolor` flashed back at 20:37.
-- [ ] **At the v1.0 tag:** confirm the 10/10 run still covers the tagged
+- [x] **At the v1.0 tag:** confirm the 10/10 run still covers the tagged
       tree: `git diff --stat ded675c -- src/ test/ layout.json
       palette.json platformio.ini` must be empty. If anything shows,
-      re-run `hil.py test --all` before tagging.
+      re-run `hil.py test --all` before tagging. Empty on 2026-09-28,
+      checked before and after the tagging commit.
 - [x] Unplugged, on battery: time wake-to-refresh on the new firmware and
       compare with the source-based expectation (~62 s: ~51 s `M5.begin()`,
       ~10.5 s Wi-Fi + fetch, ~1-2 s observed wind; `237ef2f` would have
@@ -307,7 +309,8 @@ these were found are in `notes/writeup-material.md`.
   `Serial.isPlugged()` is true (`5c5c8ba`); the flag is set at system init,
   before `setup()`, and `Serial.begin()` doesn't reset it. `TIER1_TEST`'s
   own wait is unchanged (it always runs with a host). Read in the
-  framework's `HWCDC.cpp`, 2026-09-24; not yet measured on hardware.
+  framework's `HWCDC.cpp`, 2026-09-24; confirmed indirectly on battery
+  2026-09-28 (66 s wake-to-refresh, see the checklist).
 - Without a host, `Serial` writes and `flush()` drop data instead of
   blocking, so logging costs nothing on battery -- and is lost. Anything
   that must be diagnosable on battery has to go on the panel.
@@ -745,7 +748,8 @@ map or the metadata API: `https://api.tidesandcurrents.noaa.gov/mdapi/prod/webap
    no empty values, and all quality flags `0,0`. With `units=english`, `s`
    and `g` are knots (checked against `units=metric`: 4.4 m/s = 8.55 kn).
    `fetchWind()` uses it only if the reading is within 30 min of now, on a
-   5 s timeout, and logs `WINDSRC` (`6d5d443`, **not yet flashed**).
+   5 s timeout, and logs `WINDSRC` (`6d5d443`; confirmed on hardware
+   2026-09-28, `src=obs` every cycle).
 2. **Forecast**, always available: Open-Meteo, no API key. Fetched every
    cycle for the forecast bars; its `current` values are the fallback when
    the observed reading fails or is more than 30 min old.
