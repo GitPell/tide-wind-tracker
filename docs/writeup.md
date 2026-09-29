@@ -77,8 +77,11 @@ went into that:
   produces both.
 
 The result is `hil.py test --all`: every fixture in one serial session, about
-230 ms each once the test firmware is on the board. That is cheap enough to
-run on every render-affecting change: closer to a unit test than to a
+230 ms each once the test firmware is on the board. One catch: closing a
+harness session resets the board, so a session started straight after
+another first waits out the ~50 s board initialization; `test --all` runs
+every fixture in one session and pays it at most once. That is cheap enough
+to run on every render-affecting change: closer to a unit test than to a
 hardware session.
 
 ## 3. Making Tier 0 exact: one renderer, not two

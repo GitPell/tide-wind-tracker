@@ -27,9 +27,9 @@ This file defines when the project is finished. Anything not listed here is out 
 
 ## 3. Tested
 
-- [ ] SDL host render is byte-identical to the device goldens for every fixture
-- [ ] Every golden update has a stated reason in its commit message (initial goldens are exempt)
-- [ ] `hil.py test --all` passes on device against all goldens, re-run as the last step before tagging
+- [x] SDL host render is byte-identical to the device goldens for every fixture (all 10, `decode-raw --golden`: the original five on 2026-09-24, the five failure fixtures on 2026-09-28 against `ded675c`)
+- [x] Every golden update has a stated reason in its commit message (initial goldens are exempt) (golden commits: `99808be` initial; `377c91c` "update example golden for header shift"; `ded675c` new error-display goldens, reason in the body)
+- [x] `hil.py test --all` passes on device against all goldens, re-run as the last step before tagging (10/10 on 2026-09-28 20:33, test firmware built from `637033c` source, tree at `ded675c`. Valid for the v1.0 tag only if no firmware or render files change before tagging; the CLAUDE.md checklist has the `git diff` check to run at tag time)
 
 ## 4. Ready to publish (if chosen later)
 
@@ -47,6 +47,7 @@ This file defines when the project is finished. Anything not listed here is out 
 ## Out of scope / future work
 
 - Tier 2 camera-based verification of the physical panel
+- Open and close the harness's serial port without resetting the board (the cause is untraced; DTR/RTS handling is a guess); today closing a session resets it, so a session started straight after another waits ~50 s for `M5.begin()`
 - Showing stale data after a failed fetch (would require persisting the last snapshot to flash)
 - OBS/FCST source label on the display
 - Reducing the `M5.begin()` startup cost (PMIC auto-probe theory unconfirmed). This is the primary lever for battery life: ~97% of daily energy goes to awake time, and `M5.begin()` is most of the ~78s awake window. Lead future-work item in the write-up

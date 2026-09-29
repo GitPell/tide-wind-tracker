@@ -64,12 +64,13 @@ toward it.
 - SHT40 indoor temperature/humidity; per-cycle battery logging (`BATLOG`).
 - The wake cadence after the `tm_isdst` fix (`237ef2f`): 31.7 min/cycle over
   375 cycles (see "Battery budget").
-- Test harness: `python tools/hil.py test --all` passed 5/5 on 2026-09-14
-  against the five original goldens (`calm`, `example`, `high_wind`,
-  `long_station`, `no_events`).
-- SDL host preview (`pio run -e native`): renders of all five original
-  fixtures are byte-identical to their device goldens (`hil.py decode-raw
-  --golden`, 2026-09-24; rechecked on the pinned M5GFX 2026-09-25).
+- Test harness: `python tools/hil.py test --all` passed **10/10** on
+  2026-09-28 20:33 (test firmware from `637033c`, tree at `ded675c`): the
+  five original goldens plus the five error-display goldens.
+- SDL host preview (`pio run -e native`): renders of all ten fixtures are
+  byte-identical to their device goldens (`hil.py decode-raw --golden`: the
+  original five 2026-09-24, rechecked on the pinned M5GFX 2026-09-25; the
+  five failure fixtures 2026-09-28).
 
 **Built, not yet on hardware** (ready to flash now that the run-to-empty has
 ended; the measured battery figure is for `237ef2f`, which has none of these):
@@ -82,9 +83,11 @@ ended; the measured battery figure is for `237ef2f`, which has none of these):
 - Wi-Fi failure diagnostics (`d237a73`) -- see "Serial log lines".
 - Time-sync failure handling (`b9607a8`, plus the read-once fix) -- found by reading the code, never
   observed; see "Verified corrections" -> Time.
-- Error display (`fd2298b`) -- see "Design constraints". Five failure
-  fixtures (`fail_wifi`, `fail_all`, `fail_wind`, `fail_hilo`,
-  `fail_clock`) render via the SDL build but have no goldens yet.
+- Error display (`fd2298b`) -- see "Design constraints". Device goldens
+  for its five fixtures are committed (`ded675c`), and the yellow `NO TIME
+  SYNC` header appeared on the real panel during the 2026-09-28
+  double-read bug. The production failure paths (Wi-Fi down, fetches
+  failing) still await the provoked-failure tests below.
 
 **Open items:**
 1. Wi-Fi `NO_AP_FOUND` still unresolved. The diagnostics above are built but
@@ -144,7 +147,7 @@ baseline timing, which only needs watching.
       cadence; header and footer confirmed correct on the panel. The
       19:41 wake ran on battery after unplugging (panel `UPD 19:42`), so
       it isn't in the log.
-- [ ] Flash `m5stack-papercolor-test`. First capture goldens for the new
+- [x] Flash `m5stack-papercolor-test`. First capture goldens for the new
       fixtures (`fail_wifi`, `fail_all`, `fail_wind`, `fail_hilo`,
       `fail_clock`): `python tools/hil.py render test/fixtures/<name>.json
       --out test/golden/<name>.png`. Review each, and commit them on their
@@ -155,7 +158,14 @@ baseline timing, which only needs watching.
       renders of the five new fixtures match their new goldens
       (`SDL_PREVIEW_DUMP_RAW` + `hil.py decode-raw --golden`). That
       completes DONE.md's "SDL byte-identical for every fixture" item; the
-      original five already match (see "Status").
+      original five already match (see "Status"). Done 2026-09-28:
+      goldens captured and reviewed, committed as `ded675c`; all five
+      byte-identical to their SDL renders; `test --all` 10/10 at 20:33;
+      `m5stack-papercolor` flashed back at 20:37.
+- [ ] **At the v1.0 tag:** confirm the 10/10 run still covers the tagged
+      tree: `git diff --stat ded675c -- src/ test/ layout.json
+      palette.json platformio.ini` must be empty. If anything shows,
+      re-run `hil.py test --all` before tagging.
 - [x] Unplugged, on battery: time wake-to-refresh on the new firmware and
       compare with the source-based expectation (~62 s: ~51 s `M5.begin()`,
       ~10.5 s Wi-Fi + fetch, ~1-2 s observed wind; `237ef2f` would have
@@ -836,6 +846,14 @@ result against a golden image byte-for-byte (`images_equal()` in
 A real round trip (RENDER sent -> framebuffer fully decoded) is **~230ms**
 (see "Verified corrections" -> Tooling) -- closer to a fast unit test than a
 hardware step, so run it on every render-affecting change.
+
+**Closing a session resets the board.** Observed 2026-09-28: back-to-back
+`hil.py` invocations (`ping`, `render`) each waited ~51 s -- the next session
+sat out a fresh ~50 s `M5.begin()` -- while a `test --all` started minutes
+after the previous session ran 10 fixtures in 5 s. So the reset happens
+when a session closes the port, not when it opens. The DTR/RTS mechanism
+hasn't been traced. Run fixtures in one session (`test --all`), not as a
+series of single commands.
 
 - **Exit codes are distinct.** `EXIT_MISMATCH` (1): `test` compared a real
   render against the golden and found a difference -- act on it.
