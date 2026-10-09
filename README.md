@@ -14,6 +14,20 @@ completely until the next wake.
 *A render of `test/fixtures/example.json` (synthetic data). This exact
 image is the golden that the device's rendered output is tested against.*
 
+## Why this project exists
+
+The display was the test subject, not the point. The real purpose was
+hardware-in-the-loop testing for AI-assisted firmware development: letting a
+coding agent (Claude Code) iterate on firmware for an e-paper panel it can't
+see. A test firmware renders fixtures on the device and sends the canvas
+bytes back over USB, where they are compared byte for byte against committed
+golden images, and a desktop build of the same render code produces
+byte-identical output for every fixture. A human made the decisions and
+approved every change. [docs/writeup.md](docs/writeup.md) describes the
+approach and what it caught, and its
+[§3 diagram](docs/writeup.md#3-making-tier-0-exact-one-renderer-not-two)
+shows how the pieces fit together.
+
 ## How it works
 
 ```

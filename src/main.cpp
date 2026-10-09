@@ -53,6 +53,7 @@ static time_t parseIso(const char* s) {            // "2026-08-28T14:00"
 // M5Unified has no Sht4x driver on this board -- confirmed by compile error,
 // see CLAUDE.md. Read the SHT40 (I2C 0x44) directly, matching
 // refs/M5PaperColor-UserDemo/main/hal/hal.cpp Hal::sht40Read().
+// Based on M5Stack's factory demo Hal::sht40Read() (MIT, © M5Stack).
 static bool readSht40(float* tempC, float* rh) {
   static constexpr uint8_t SHT4X_ADDR    = 0x44;
   static constexpr uint8_t SHT4X_CMD_HI_PRE = 0xFD;
